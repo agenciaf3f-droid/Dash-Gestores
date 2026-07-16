@@ -1096,6 +1096,16 @@ function isExcludedGestor(name){
   return EXCLUDED_GESTORS.some(g => n.includes(g));
 }
 
+// Grupo fechado. O marcador é escrito à mão e aparece em 4 formatos na base:
+//   "(FECHADO)F3F - X"  "( FECHADO ) F3F - X"  "F3F - (FECHADO) X"  "F3F - X (FECHADO)"
+// Por isso a busca é solta, sem âncora e sem exigir os parênteses — o regex
+// ancorado usado na área de churn (/^\(FECHADO\)\s*/) pega só 25 dos 45.
+// Conferido contra os 334 grupos da base: 45 acertos, zero falso positivo.
+// O nome manda: há grupo marcado FECHADO com Status "Ativo" na planilha.
+function isGrupoFechado(groupName){
+  return /fechado/i.test(String(groupName || ''));
+}
+
 // Gestores: quando respondem, entram no resumo por gestor
 const GESTOR_PHONES = new Set();
 
@@ -1886,6 +1896,18 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     if(fromGestor){
       g.gestorMsgs.push({ dt, text: msgText, type: typeRaw, gestor: meta.gestor });
     }
+
+    // Cliente fechado: não abre nem fecha trilha. Os dois guards ficam aqui, e não
+    // no topo do loop junto de isExcludedGestor, de propósito — acima g.msgs e
+    // g.gestorMsgs já foram preenchidos, então o grupo continua na tabela e nos
+    // relatórios. Sai só do cronômetro, que é o que estava contando errado.
+    if(isGrupoFechado(gf(row,'groupName'))) return;
+
+    // Clique de botão do cliente. As automações mandam prompt com botão; o clique
+    // chega como Tipo "Botão" e hoje abre atendimento, como se o cliente tivesse
+    // pedido algo. Confirmar um botão não é pedido. São 369 na base — e o tipo
+    // basta: reply_to_id só existe em 39 deles (message_id falta em 94% das linhas).
+    if(!fromTeam && typeRaw === 'Botão') return;
 
     /* ── MULTI-TRACK STATE MACHINE ── */
     const mentions = detectMentions(msgText);
