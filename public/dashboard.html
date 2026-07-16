@@ -2015,11 +2015,30 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
      ================================================================ */
   const agora = new Date();
 
+  // Grupo abandonado: sem mensagem humana há mais de 45 dias.
+  //
+  // Ticket aberto conta até agora, então um grupo que parou de falar acumula
+  // expediente para sempre e nunca fecha — 25 casos assim hoje, o mais antigo
+  // aberto há 297 dias, somando ~1,6 milhão de minutos úteis e inflando a média
+  // do gestor em cerca de dois terços. Não é atendimento pendente: é dado morto.
+  //
+  // O corte só vale para tickets ABERTOS. Ticket fechado em grupo abandonado é
+  // história real e continua contando.
+  //
+  // 45 dias é folgado dos dois lados: os abandonados estão todos acima de 118
+  // dias parados, e nenhum atendimento aberto legítimo passa de 31. O relatório
+  // do gestor mantém o grupo vivo — g.lastMsgDt considera qualquer mensagem
+  // humana, não só do cliente, porque cliente calado não é grupo morto.
+  const ABANDONO_DIAS = 45;
+  const grupoAbandonado = g =>
+    !g.lastMsgDt || (agora - g.lastMsgDt) / 86400000 > ABANDONO_DIAS;
+
   // Open gestor tickets
   Object.keys(grpState).forEach(grpId => {
     const st = grpState[grpId];
     if(!st.gestor.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g)) return;
     const leadMins = bizMins(st.gestor.desde, agora);
     ltCases.push({
       grpId, pendente_desde: st.gestor.desde, pendente_phone: st.gestor.phone,
@@ -2034,6 +2053,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const st = grpState[grpId];
     if(!st.edicao.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g)) return;
     const leadMins = bizMins(st.edicao.desde, agora);
     ltCasesEdicao.push({
       grpId, pendente_desde: st.edicao.desde, pendente_phone: st.edicao.phone,
@@ -2047,6 +2067,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const st = grpState[grpId];
     if(!st.webdesign.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g)) return;
     const leadMins = bizMins(st.webdesign.desde, agora);
     ltCasesWebdesign.push({
       grpId, pendente_desde: st.webdesign.desde, pendente_phone: st.webdesign.phone,
@@ -2060,6 +2081,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const st = grpState[grpId];
     if(!st.estrategia.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g)) return;
     const leadMins = bizMins(st.estrategia.desde, agora);
     ltCasesEstrategia.push({
       grpId, pendente_desde: st.estrategia.desde, pendente_phone: st.estrategia.phone,
