@@ -1901,7 +1901,19 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     // no topo do loop junto de isExcludedGestor, de propósito — acima g.msgs e
     // g.gestorMsgs já foram preenchidos, então o grupo continua na tabela e nos
     // relatórios. Sai só do cronômetro, que é o que estava contando errado.
-    if(isGrupoFechado(gf(row,'groupName'))) return;
+    //
+    // O reset não é decoração. O marcador é escrito à mão no dia que o cliente sai,
+    // então as linhas anteriores têm o nome antigo e passam por aqui: elas abrem
+    // trilha, e as linhas de depois — que fechariam — são barradas por este guard.
+    // Sem zerar, a trilha aberta na véspera fica pendente para sempre e conta
+    // expediente até agora. São 38 grupos renomeados no meio da vida na base; o
+    // corte de abandono só varre os parados há mais de 45 dias, então os fechados
+    // recentes escapavam dos dois. Zerar aqui descarta a trilha órfã.
+    // Idempotente: zerar o que já está zerado não faz nada.
+    if(isGrupoFechado(gf(row,'groupName'))){
+      grpState[grpId] = makeEmptyState();
+      return;
+    }
 
     // Clique de botão do cliente. As automações mandam prompt com botão; o clique
     // chega como Tipo "Botão" e hoje abre atendimento, como se o cliente tivesse
