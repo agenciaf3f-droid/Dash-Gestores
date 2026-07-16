@@ -33,3 +33,7 @@ supabase/.temp/
 
 # Notas internas — não publicar
 SECURITY-FINDINGS.md
+
+# Vercel
+.vercel
+.env*

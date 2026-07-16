@@ -40,15 +40,31 @@ export async function validateSession(req) {
   return { ok: true, user };
 }
 
-/** Lê e valida o roster da env var. Falha alto: roster vazio classificaria todo gestor como cliente. */
+/**
+ * Lê e valida o roster da env var.
+ *
+ * O valor é JSON em base64, não JSON puro. Motivo: `vercel env pull` grava o
+ * valor entre aspas duplas sem escapar as aspas internas, então JSON cru
+ * corrompe o .env.local inteiro a partir daquela linha — e nenhuma variável
+ * seguinte carrega. Base64 não tem aspas e sobrevive a qualquer parser de .env.
+ *
+ * Falha alto de propósito: roster vazio faria isGestorPhone() devolver false
+ * para todos e todo gestor seria classificado como cliente.
+ */
 export function readRoster() {
   const raw = process.env.ROSTER;
   if (!raw) throw new Error("ROSTER env var not set");
+  let json;
+  try {
+    json = Buffer.from(raw, "base64").toString("utf8");
+  } catch {
+    throw new Error("ROSTER env var is not valid base64");
+  }
   let r;
   try {
-    r = JSON.parse(raw);
+    r = JSON.parse(json);
   } catch {
-    throw new Error("ROSTER env var is not valid JSON");
+    throw new Error("ROSTER env var is not valid base64-encoded JSON");
   }
   if (!Array.isArray(r.gestor) || !r.gestor.length) throw new Error("ROSTER.gestor missing or empty");
   if (!Array.isArray(r.lt2) || !r.lt2.length) throw new Error("ROSTER.lt2 missing or empty");
