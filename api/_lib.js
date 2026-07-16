@@ -37,6 +37,35 @@ export async function validateSession(req) {
 
   const user = await r.json().catch(() => null);
   if (!user || !user.id) return { ok: false, status: 401, error: "invalid session" };
+
+  // Sessão válida NÃO é autorização.
+  //
+  // O projeto de auth está com cadastro público aberto (disable_signup: false):
+  // qualquer pessoa cria conta com um e-mail próprio, confirma, e passa a ter
+  // sessão válida. Sem a checagem abaixo, isso daria acesso às ~103 mil mensagens
+  // de clientes — trocaria "vaza sem login" por "vaza com login que o atacante
+  // mesmo cria".
+  //
+  // ALLOWED_EMAILS: lista separada por vírgula. Se não estiver configurada,
+  // NEGA tudo — falhar fechado. Um deploy sem essa var deve derrubar o
+  // dashboard, não escancarar os dados.
+  const allow = (process.env.ALLOWED_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!allow.length) {
+    console.error("[auth] ALLOWED_EMAILS nao configurada — negando por seguranca");
+    return { ok: false, status: 503, error: "authorization not configured" };
+  }
+
+  const email = (user.email || "").toLowerCase();
+  const ok = allow.some((rule) => (rule.startsWith("@") ? email.endsWith(rule) : email === rule));
+  if (!ok) {
+    console.warn(`[auth] acesso negado para ${email}`);
+    return { ok: false, status: 403, error: "not authorized" };
+  }
+
   return { ok: true, user };
 }
 
