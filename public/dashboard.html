@@ -1083,6 +1083,10 @@ async function supaHeaders(){
 let REPORT_TAGS = [];
 const BIZ_START = 9, BIZ_END = 18;
 
+// Dias sem mensagem humana a partir dos quais o grupo é dado como abandonado e o
+// ticket aberto para de contar. Compartilhado pelos dois motores de lead time.
+const ABANDONO_DIAS = 45;
+
 /* ================================================================
    LEAD TIME — PHONE LISTS (preenchidas por applyRoster)
    ================================================================ */
@@ -1142,9 +1146,9 @@ function applyRoster(r){
 
   // Motor novo (aba 4) — mesmo roster, formato próprio. Vive noutro <script>,
   // já parseado quando isto roda (bootData é o último a executar).
-  if(typeof LT2_REGISTRY !== 'undefined'){
-    LT2_REGISTRY.clear();
-    (r.lt2 || []).forEach(e => LT2_REGISTRY.set(e.phone, { nome: e.nome, setor: e.setor }));
+  if(typeof EQUIPE_POR_TELEFONE !== 'undefined'){
+    EQUIPE_POR_TELEFONE.clear();
+    (r.equipe || []).forEach(e => EQUIPE_POR_TELEFONE.set(e.phone, { nome: e.nome, setor: e.setor }));
   }
 
   _rosterLoaded = GESTOR_PHONES.size > 0;
@@ -2041,7 +2045,9 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   // dias parados, e nenhum atendimento aberto legítimo passa de 31. O relatório
   // do gestor mantém o grupo vivo — g.lastMsgDt considera qualquer mensagem
   // humana, não só do cliente, porque cliente calado não é grupo morto.
-  const ABANDONO_DIAS = 45;
+  //
+  // ABANDONO_DIAS vive no escopo do arquivo (perto de BIZ_START) — o motor da aba
+  // de repasse usa a mesma constante.
   const grupoAbandonado = g =>
     !g.lastMsgDt || (agora - g.lastMsgDt) / 86400000 > ABANDONO_DIAS;
 
@@ -4807,18 +4813,18 @@ init();
    ================================================================ */
 // phone -> {nome, setor}. Preenchido por applyRoster a partir de /api/config;
 // os números viviam aqui em claro e este arquivo é servido publicamente.
-const LT2_REGISTRY = new Map();
-const LT2_SETOR_LABEL = { TRAFEGO:'Tráfego', ESTRATEGIA:'Estratégia', CRIACAO:'Criação' };
-function lt2Classify(phone){ return LT2_REGISTRY.get(phone) || null; }
-function lt2NormLid(raw){ if(!raw) return ''; return String(raw).split('@')[0].split(':')[0].replace(/\D/g,''); }
-function lt2Median(a){ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
-function lt2Fmt(min){ min=Math.round(min); const h=Math.floor(min/60),m=min%60; return h?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
+const EQUIPE_POR_TELEFONE = new Map();
+const SETOR_LABEL = { TRAFEGO:'Tráfego', ESTRATEGIA:'Estratégia', CRIACAO:'Criação' };
+function quemE(phone){ return EQUIPE_POR_TELEFONE.get(phone) || null; }
+function normalizaLid(raw){ if(!raw) return ''; return String(raw).split('@')[0].split(':')[0].replace(/\D/g,''); }
+function mediana(a){ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function fmtMin(min){ min=Math.round(min); const h=Math.floor(min/60),m=min%60; return h?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
 
-function lt2Compute(rows){
+function calculaLeadTimeRepasse(rows){
   // mapa LID -> telefone (aprendido das próprias mensagens)
   const lidMap = new Map();
   for(const r of rows){
-    const lid = lt2NormLid(gf(r,'senderLid'));
+    const lid = normalizaLid(gf(r,'senderLid'));
     const ph  = normalizePhone(gf(r,'phone'));
     if(lid && ph) lidMap.set(lid, ph);
   }
@@ -4827,8 +4833,8 @@ function lt2Compute(rows){
     const found = String(text||'').match(/@(\d{8,})/g) || [];
     for(const tok of found){
       const d = tok.slice(1);
-      const phone = lidMap.get(d) || (LT2_REGISTRY.has(d) ? d : null);
-      if(phone){ const who = lt2Classify(phone); if(who) setores.add(who.setor); }
+      const phone = lidMap.get(d) || (EQUIPE_POR_TELEFONE.has(d) ? d : null);
+      if(phone){ const who = quemE(phone); if(who) setores.add(who.setor); }
     }
     return setores;
   }
@@ -4842,17 +4848,33 @@ function lt2Compute(rows){
     // índices para resolver citações
     const byMsgId=new Map(), byText=new Map();
     for(const r of grows){
-      const dt=parseDateTime(r); const ph=normalizePhone(gf(r,'phone')); const who=lt2Classify(ph);
+      const dt=parseDateTime(r); const ph=normalizePhone(gf(r,'phone')); const who=quemE(ph);
       const mid=gf(r,'messageId').trim(); if(mid && !byMsgId.has(mid)) byMsgId.set(mid,{phone:ph,who,dt});
       const tx=gf(r,'msg').trim();       if(tx  && !byText.has(tx))   byText.set(tx,{phone:ph,who,dt});
     }
-    let ticket=null; // {desde, owner, clientText, clientMsgId}
+    // FILA de tickets abertos, do mais antigo para o mais novo.
+    // Mais de um corre ao mesmo tempo: se o gestor repassa @Paulo e o cliente fala de
+    // novo, a bola do Paulo segue correndo e nasce uma bola nova para o gestor.
+    // Cada um: {desde, owner, liberados:Set, clientText, clientMsgId}
+    let fila=[];
+    let ultimaFoiTime=true; // início de grupo conta como "time falou" -> 1a msg do cliente abre
+    let ultimaHumana=null;  // p/ o corte de abandono; automação não conta
     for(const r of grows){
       const dt=parseDateTime(r); if(!dt)continue;
       const phone=normalizePhone(gf(r,'phone')); if(phone===AUTOMATION_NUMBER) continue;
       const text=gf(r,'msg').trim();
-      const who=lt2Classify(phone); // null = cliente
+      const who=quemE(phone); // null = cliente
       const ment=resolveMentions(text);
+
+      if(!ultimaHumana || dt>ultimaHumana) ultimaHumana=dt;
+
+      // Cliente fechado: descarta o que estava pendente e para de contar. O marcador é
+      // escrito à mão no dia que o cliente sai, então as linhas anteriores têm o nome
+      // antigo e podem ter aberto ticket — sem zerar, ficam pendentes para sempre.
+      if(isGrupoFechado(gf(r,'groupName'))){ fila=[]; continue; }
+
+      // Clique de botão do cliente: confirmar um botão de automação não é pedido.
+      if(!who && gf(r,'type').trim()==='Botão') continue;
       // citação (reply)
       const rid=gf(r,'replyToId').trim();
       const rtext=gf(r,'reply').trim();
@@ -4863,44 +4885,108 @@ function lt2Compute(rows){
       const replyClient = orig ? !orig.who : false;
 
       if(!who){
-        // CLIENTE
-        if(!ticket){
+        // ── CLIENTE ──
+        // Só nasce bola nova se o time falou desde a última. Cliente mandando várias
+        // seguidas é a mesma pergunta: conta da primeira e não reinicia.
+        if(ultimaFoiTime){
+          // Dono na abertura: quem o cliente marcou, senão o setor de quem ele citou,
+          // senão o gestor. Marcando mais de um, vale o primeiro — não dá para saber
+          // qual ele quis, e cair no padrão jogaria no gestor uma bola que o cliente
+          // explicitamente endereçou a outros.
           let owner='TRAFEGO';
-          if(ment.size===1) owner=[...ment][0];
+          if(ment.size>=1) owner=[...ment][0];
           else if(replySetor) owner=replySetor;
-          ticket={desde:dt, owner, clientText:text, clientMsgId:gf(r,'messageId').trim()};
+          // liberados: TELEFONES de quem já passou esta bola e não paga mais por ela.
+          // Por pessoa, não por setor: o crédito é por pessoa, o escudo tem que ser
+          // também. Por setor, um gestor marcar liberaria os outros quatro sem que
+          // fizessem nada — e o time descobriria isso na primeira semana.
+          // Por grupo também: `fila` nasce dentro do laço de grupos, então marcar no
+          // grupo de um cliente não dá escudo no grupo de outro.
+          fila.push({desde:dt, owner, liberados:new Set(), clientText:text, clientMsgId:gf(r,'messageId').trim()});
         }
+        ultimaFoiTime=false;
       } else {
-        const replyToPendingClient = (rid && ticket && ticket.clientMsgId && rid===ticket.clientMsgId)
-                                   || (rtext && ticket && rtext===ticket.clientText)
-                                   || (replyClient && ticket);
-        if(ticket){
-          const fecha = who.setor===ticket.owner || replyToPendingClient;
-          if(fecha){
-            cases.push({gid, desde:ticket.desde, fim:dt, responder:who, owner:ticket.owner, leadMins:bizMins(ticket.desde,dt)});
-            ticket=null;
-          } else if(who.setor==='TRAFEGO' && ticket.owner==='TRAFEGO' && ment.size===1 && [...ment][0]!=='TRAFEGO'){
-            ticket.owner=[...ment][0]; // redirecionamento: gestor marca outro setor
+        ultimaFoiTime=true;
+
+        // Quem fala num grupo com cliente esperando assume a bola — a menos que passe
+        // adiante marcando alguém. O @ é um escudo: quem marca sai daquele relógio e
+        // segue falando de graça, e de quebra avisa o responsável. Quem fala sem
+        // marcar, assumiu.
+        //
+        // É o que faz a marcação existir. O cliente só marca em 3% das mensagens; sem
+        // custo para quem fica calado sobre de quem é a bola, o sistema nunca saberia
+        // para quem ele falou — e tudo cairia no gestor por padrão, o defeito de hoje.
+        //
+        // Marcar DOIS também é repasse. Exigir exatamente um cobraria de quem chamou
+        // dois colegas para resolver — punindo justamente o comportamento que a regra
+        // quer criar.
+        const repassa = ment.size>=1 && !ment.has(who.setor);
+
+        // Citação manda sobre tudo: quem cita a mensagem do cliente está respondendo
+        // ÀQUELA bola, não à mais antiga da fila. Sem isto, o editor que responde
+        // citando uma pergunta nova fecharia a bola velha do Paulo e deixaria aberta a
+        // que ele de fato respondeu. Citação é o sinal mais comum que existe nos dados
+        // (971 resolvem setor no histórico, contra 96 repasses), então não pode perder
+        // para a heurística de fila.
+        const citada = (rid || rtext)
+          ? fila.findIndex(t => (rid && t.clientMsgId && rid===t.clientMsgId) || (rtext && rtext===t.clientText))
+          : -1;
+        if(citada>=0 && !repassa){
+          const t=fila[citada];
+          cases.push({gid, desde:t.desde, fim:dt, responder:who, owner:t.owner, leadMins:bizMins(t.desde,dt)});
+          fila.splice(citada,1);
+          continue;
+        }
+
+        // Alvo padrão: a bola mais antiga que ainda pesa sobre quem está falando — não
+        // é sempre a primeira da fila. Quem já repassou está livre daquela e responde
+        // pela seguinte. É isto que faz dois relógios correrem juntos: o do Paulo (bola
+        // repassada) e o do gestor (bola nova, nascida quando o cliente voltou a falar
+        // depois do @).
+        const i = fila.findIndex(t => t.owner===who.setor || !t.liberados.has(phone));
+        if(i<0){
+          // Nenhuma bola aberta pesa sobre ele. Se citou uma mensagem de cliente que
+          // não virou bola (o cliente falou várias seguidas e só a primeira abriu),
+          // registra retroativo — era o que o motor fazia antes da fila existir.
+          if(!repassa && replyClient && orig && orig.dt){
+            cases.push({gid, desde:orig.dt, fim:dt, responder:who, owner:who.setor, leadMins:bizMins(orig.dt,dt)});
           }
-        } else if(replyClient && orig && orig.dt){
-          cases.push({gid, desde:orig.dt, fim:dt, responder:who, owner:who.setor, leadMins:bizMins(orig.dt,dt)});
+          continue; // repassou todas as bolas abertas: imune, fala de graça
+        }
+
+        const t = fila[i];
+        if(repassa){
+          // Marcou: entrega a bola e fica imune a ELA. Vale inclusive (e sobretudo)
+          // para a bola que já era sua — nascer sua por padrão e ser repassada é o
+          // caso normal. `desde` não é tocado: o timer de quem recebe conta desde a
+          // mensagem do cliente, não desde o repasse. Mede o que o cliente esperou.
+          t.owner=[...ment][0];
+          t.liberados.add(phone);
+        } else {
+          // É o dono, ou falou sem marcar: assumiu. Fecha e paga.
+          cases.push({gid, desde:t.desde, fim:dt, responder:who, owner:t.owner, leadMins:bizMins(t.desde,dt)});
+          fila.splice(i,1);
         }
       }
     }
-    if(ticket) abertos++;
+    // Grupo abandonado: sem mensagem humana há mais de ABANDONO_DIAS. Bola aberta conta
+    // até agora, então um grupo que parou de falar acumularia expediente para sempre.
+    // Vale só para as ABERTAS — as fechadas são história real.
+    const abandonado = !ultimaHumana || (Date.now()-ultimaHumana)/86400000 > ABANDONO_DIAS;
+    if(!abandonado) abertos += fila.length;
   }
   return {cases, abertos, lidCount:lidMap.size};
 }
 
-function lt2Render(){
+function renderLeadTimeRepasse(){
   const rowsAll = window.rawRows || [];
-  const elK=document.getElementById('lt2-kpis'); if(!elK) return;
+  const elK=document.getElementById('repasse-kpis'); if(!elK) return;
   if(!rowsAll.length){ elK.innerHTML='<div style="color:#9ca3af;">Carregando dados…</div>'; return; }
-  const days=parseInt(document.getElementById('lt2-period').value,10)||0;
+  const days=parseInt(document.getElementById('repasse-period').value,10)||0;
   let rows=rowsAll;
   if(days>0){ const cut=new Date(); cut.setDate(cut.getDate()-days); cut.setHours(0,0,0,0); rows=rowsAll.filter(r=>{ const d=parseDateTime(r); return d && d>=cut; }); }
 
-  const {cases,abertos,lidCount}=lt2Compute(rows);
+  const {cases,abertos,lidCount}=calculaLeadTimeRepasse(rows);
   const allLead=cases.map(c=>c.leadMins);
 
   // KPIs
@@ -4908,7 +4994,7 @@ function lt2Render(){
   elK.innerHTML =
     kpi(cases.length,'Tickets fechados') +
     kpi(abertos,'Ainda abertos','#f59e0b') +
-    kpi(lt2Fmt(lt2Median(allLead)),'Lead time mediano') +
+    kpi(fmtMin(mediana(allLead)),'Lead time mediano') +
     kpi(rows.length.toLocaleString('pt-BR'),'Mensagens no período');
 
   // tabela genérica
@@ -4920,8 +5006,8 @@ function lt2Render(){
     for(const g of groups){
       h+=`<tr style="border-bottom:1px solid #f3f4f6;"><td style="padding:8px 6px;font-weight:600;">${g.k}</td>`+
          `<td style="padding:8px 6px;text-align:right;">${g.n}</td>`+
-         `<td style="padding:8px 6px;text-align:right;font-weight:700;">${lt2Fmt(g.med)}</td>`+
-         `<td style="padding:8px 6px;text-align:right;color:#9ca3af;">${lt2Fmt(g.avg)}</td></tr>`;
+         `<td style="padding:8px 6px;text-align:right;font-weight:700;">${fmtMin(g.med)}</td>`+
+         `<td style="padding:8px 6px;text-align:right;color:#9ca3af;">${fmtMin(g.avg)}</td></tr>`;
     }
     if(!groups.length) h+='<tr><td colspan="4" style="padding:12px 6px;color:#9ca3af;">Sem tickets no período.</td></tr>';
     return h+'</tbody></table>';
@@ -4929,15 +5015,15 @@ function lt2Render(){
   function agrupar(keyFn){
     const m=new Map();
     for(const c of cases){ const k=keyFn(c); if(!m.has(k))m.set(k,[]); m.get(k).push(c.leadMins); }
-    return [...m.entries()].map(([k,v])=>({k,n:v.length,med:lt2Median(v),avg:v.reduce((a,b)=>a+b,0)/v.length})).sort((a,b)=>b.n-a.n);
+    return [...m.entries()].map(([k,v])=>({k,n:v.length,med:mediana(v),avg:v.reduce((a,b)=>a+b,0)/v.length})).sort((a,b)=>b.n-a.n);
   }
-  document.getElementById('lt2-setores').innerHTML = tabela(agrupar(c=>LT2_SETOR_LABEL[c.responder.setor]||c.responder.setor));
-  document.getElementById('lt2-pessoas').innerHTML = tabela(agrupar(c=>c.responder.nome));
+  document.getElementById('repasse-setores').innerHTML = tabela(agrupar(c=>SETOR_LABEL[c.responder.setor]||c.responder.setor));
+  document.getElementById('repasse-pessoas').innerHTML = tabela(agrupar(c=>c.responder.nome));
 
   // nota de warm-up
   const comLid=rows.filter(r=>gf(r,'senderLid').trim()).length;
   const pct=rows.length?Math.round(100*comLid/rows.length):0;
-  document.getElementById('lt2-note').innerHTML =
+  document.getElementById('repasse-note').innerHTML =
     `${pct}% das mensagens do período já têm identificação de menção (sender_lid). `+
     `Conforme o histórico "aquece", a atribuição de Criação/Estratégia fica mais completa. `+
     `Códigos de equipe aprendidos: ${lidCount}.`;
@@ -4949,7 +5035,7 @@ function lt2Render(){
    BOOT DOS DADOS — último script de propósito
    ================================================================
    Roda por último para que todos os módulos já existam (em especial
-   LT2_REGISTRY, declarado no <script> acima e preenchido por applyRoster).
+   EQUIPE_POR_TELEFONE, declarado no <script> acima e preenchido por applyRoster).
 
    A ORDEM É OBRIGATÓRIA:  sessão -> roster -> motor.
 

@@ -96,7 +96,7 @@ export function readRoster() {
     throw new Error("ROSTER env var is not valid base64-encoded JSON");
   }
   if (!Array.isArray(r.gestor) || !r.gestor.length) throw new Error("ROSTER.gestor missing or empty");
-  if (!Array.isArray(r.lt2) || !r.lt2.length) throw new Error("ROSTER.lt2 missing or empty");
+  if (!Array.isArray(r.equipe) || !r.equipe.length) throw new Error("ROSTER.equipe missing or empty");
   if (!r.automation) throw new Error("ROSTER.automation missing");
   return r;
 }
