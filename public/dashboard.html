@@ -4180,6 +4180,22 @@ function gruposChurnPorMes(){
     const m = s.match(/^F3F\s*-\s*(.+?)\s*-\s*([^-]+)$/i);
     return m ? { nome:m[1].trim(), plano:m[2].trim() } : { nome:s.replace(/^F3F\s*-\s*/i,'').trim() || '—', plano:'—' };
   };
+  // Cliente que voltou não é churn. O retorno acontece de dois jeitos: o grupo é
+  // renomeado de volta (tira o FECHADO), OU abrem um grupo NOVO para o mesmo cliente
+  // (foi o caso da Gisele: grupo antigo fechado + grupo novo "FUNIL"). Os dois são
+  // pegos casando o NOME do cliente: se há atividade em grupo aberto depois de fechar,
+  // ele voltou. Guarda a última atividade aberta por cliente.
+  const cliKey = raw => limpa(raw).nome.toLowerCase();
+  const ativoAte = {};
+  for(const arr of byG.values()){
+    for(const m of arr){
+      if(!isGrupoFechado(m.nome)){
+        const c = cliKey(m.nome);
+        if(c && (!ativoAte[c] || m.dt > ativoAte[c])) ativoAte[c] = m.dt;
+      }
+    }
+  }
+
   const saidas = {}, items = {}, grupos = [];
   for(const [g, arr] of byG){
     arr.sort((a,b)=>a.dt-b.dt);
@@ -4188,14 +4204,18 @@ function gruposChurnPorMes(){
     const bornFechado = idx === 0;               // já nasceu fechado -> não dá pra datar a saída
     let fim = idx >= 0 ? arr[idx].dt : null;
     if(idx > 0){
-      const k = `${fim.getFullYear()}-${String(fim.getMonth()+1).padStart(2,'0')}`;
-      saidas[k] = (saidas[k]||0) + 1;
-      const { nome, plano } = limpa(arr[idx].nome);
-      const gestor = [...arr].reverse().map(m=>m.gestor).find(x=>x && x.trim()) || '—';
-      // shape compatível com o drill do gráfico mensal (churnOpenDrilldown).
-      // entrada/dias/ltv = null: só sabemos a data de SAÍDA (a de entrada real não
-      // está no grupo, só a 1ª mensagem da janela de dados — não é confiável).
-      (items[k] = items[k] || []).push({ nome, gestor, plano, entrada:null, saida:fim, dias:null, ltv:null, isChurn:true });
+      const cli = cliKey(arr[idx].nome);
+      const voltou = ativoAte[cli] && ativoAte[cli] > fim;   // ativo depois de fechar = voltou
+      if(!voltou){
+        const k = `${fim.getFullYear()}-${String(fim.getMonth()+1).padStart(2,'0')}`;
+        saidas[k] = (saidas[k]||0) + 1;
+        const { nome, plano } = limpa(arr[idx].nome);
+        const gestor = [...arr].reverse().map(m=>m.gestor).find(x=>x && x.trim()) || '—';
+        // shape compatível com o drill do gráfico mensal (churnOpenDrilldown).
+        // entrada/dias/ltv = null: só sabemos a data de SAÍDA (a de entrada real não
+        // está no grupo, só a 1ª mensagem da janela de dados — não é confiável).
+        (items[k] = items[k] || []).push({ nome, gestor, plano, entrada:null, saida:fim, dias:null, ltv:null, isChurn:true });
+      }
     }
     grupos.push({ inicio, fim, bornFechado });
   }
