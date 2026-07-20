@@ -4267,6 +4267,17 @@ function churnRender(){
       cur.setMonth(cur.getMonth()+1);
     }
   }
+  // period='all' não preenche meses contínuos, então jun/jul 2026 — que só têm dado
+  // no banco, não na planilha (parou em maio) — ficavam de fora. Garante a era do
+  // banco (a partir do corte) até o mês atual.
+  if(!cutoff){
+    const cur = new Date(CHURN_DB_CUTOFF.getFullYear(), CHURN_DB_CUTOFF.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+    while(cur <= end){
+      monthSet.add(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`);
+      cur.setMonth(cur.getMonth()+1);
+    }
+  }
   const monthKeys = [...monthSet].sort();
   const monthData = monthKeys.map(k => {
     const [y,m] = k.split('-').map(Number);
