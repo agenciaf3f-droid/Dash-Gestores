@@ -1110,6 +1110,16 @@ function isGrupoFechado(groupName){
   return /fechado/i.test(String(groupName || ''));
 }
 
+// Mensagem só com emoji (reação: cliente rindo/reagindo, "🤣🤣🤣", "👍").
+// De CLIENTE não abre atendimento — reagir não é pedido. De membro do time conta
+// normal (é resposta). Global: os dois motores de lead time usam.
+function soEmoji(txt){
+  const s = String(txt || '').trim();
+  if(!s) return false;
+  // só emoji + modificadores (tom de pele, ZWJ, seletor de variação) e espaços
+  return /^[\p{Extended_Pictographic}\p{Emoji_Presentation}‍️\u{1F3FB}-\u{1F3FF}\s]+$/u.test(s);
+}
+
 // Gestores: quando respondem, entram no resumo por gestor
 const GESTOR_PHONES = new Set();
 
@@ -1931,6 +1941,11 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     // pedido algo. Confirmar um botão não é pedido. São 369 na base — e o tipo
     // basta: reply_to_id só existe em 39 deles (message_id falta em 94% das linhas).
     if(!fromTeam && typeRaw === 'Botão') return;
+
+    // Reação de cliente (só emoji): não abre atendimento. Vale para todas as trilhas
+    // — reagir não é pedido. De membro do time conta normal (não passa por aqui, cai
+    // nos ramos de fromGestor/fromEdicao/etc. e fecha o ticket).
+    if(!fromTeam && soEmoji(msgText)) return;
 
     /* ── MULTI-TRACK STATE MACHINE ── */
     const mentions = detectMentions(msgText);
@@ -5018,6 +5033,8 @@ function calculaLeadTimeRepasse(rows){
 
       // Clique de botão do cliente: confirmar um botão de automação não é pedido.
       if(!who && gf(r,'type').trim()==='Botão') continue;
+      // Reação de cliente (só emoji): não abre bola. De membro do time conta normal.
+      if(!who && soEmoji(text)) continue;
       // citação (reply)
       const rid=gf(r,'replyToId').trim();
       const rtext=gf(r,'reply').trim();
