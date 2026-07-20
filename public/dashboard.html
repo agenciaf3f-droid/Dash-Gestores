@@ -1627,6 +1627,13 @@ async function fetchData(){
         renderChurnRiskChart(sel ? sel.value : 'all');
       }
     } catch(_){}
+    // O churn de mai/26+ vem de rawRows (grupos FECHADO). Se a aba já foi aberta
+    // antes dos dados chegarem, re-renderiza agora para preencher esses meses.
+    try {
+      if(window._churnInitialized && _churnRows && _churnRows.length && typeof churnRender === 'function'){
+        churnRender();
+      }
+    } catch(_){}
   } catch(e){
     console.error('[F3F] Erro ao buscar dados:', e);
     _isFetching = false;
@@ -4152,6 +4159,53 @@ function churnActiveAtMonthStart(rows, monthStart, planFilter){
   return { count, list };
 }
 
+// A planilha de churn era mantida à mão até abril/2026 — de maio em diante pararam.
+// Deste mês em diante o churn vem do NOSSO banco (as mensagens): o cliente saiu no
+// dia em que o grupo foi renomeado para "(FECHADO)". A data da 1ª mensagem já com o
+// marcador é a data da saída. Antes de maio, segue a planilha.
+const CHURN_DB_CUTOFF = new Date(2026, 4, 1); // 1º de maio de 2026
+
+function gruposChurnPorMes(){
+  const rows = window.rawRows || [];
+  const byG = new Map();
+  for(const r of rows){
+    const g = gf(r,'groupId').trim(); if(!g) continue;
+    const dt = parseDateTime(r); if(!dt) continue;
+    if(!byG.has(g)) byG.set(g, []);
+    byG.get(g).push({ dt, nome: gf(r,'groupName'), gestor: gf(r,'gestorName') });
+  }
+  // "F3F - NOME - PLANO" (com marcador de fechado em qualquer lugar) -> {nome, plano}
+  const limpa = raw => {
+    const s = String(raw||'').replace(/\(?\s*fechado\s*\)?/ig,' ').replace(/\s+/g,' ').trim();
+    const m = s.match(/^F3F\s*-\s*(.+?)\s*-\s*([^-]+)$/i);
+    return m ? { nome:m[1].trim(), plano:m[2].trim() } : { nome:s.replace(/^F3F\s*-\s*/i,'').trim() || '—', plano:'—' };
+  };
+  const saidas = {}, items = {}, grupos = [];
+  for(const [g, arr] of byG){
+    arr.sort((a,b)=>a.dt-b.dt);
+    const inicio = arr[0].dt;
+    const idx = arr.findIndex(m => isGrupoFechado(m.nome));
+    const bornFechado = idx === 0;               // já nasceu fechado -> não dá pra datar a saída
+    let fim = idx >= 0 ? arr[idx].dt : null;
+    if(idx > 0){
+      const k = `${fim.getFullYear()}-${String(fim.getMonth()+1).padStart(2,'0')}`;
+      saidas[k] = (saidas[k]||0) + 1;
+      const { nome, plano } = limpa(arr[idx].nome);
+      const gestor = [...arr].reverse().map(m=>m.gestor).find(x=>x && x.trim()) || '—';
+      // shape compatível com o drill do gráfico mensal (churnOpenDrilldown).
+      // entrada/dias/ltv = null: só sabemos a data de SAÍDA (a de entrada real não
+      // está no grupo, só a 1ª mensagem da janela de dados — não é confiável).
+      (items[k] = items[k] || []).push({ nome, gestor, plano, entrada:null, saida:fim, dias:null, ltv:null, isChurn:true });
+    }
+    grupos.push({ inicio, fim, bornFechado });
+  }
+  // ativos no início de um mês: grupos que já existiam e ainda não tinham fechado
+  const ativosNoInicio = (monthStart) => grupos.filter(a =>
+    !a.bornFechado && a.inicio < monthStart && (!a.fim || a.fim >= monthStart)
+  ).length;
+  return { saidas, items, ativosNoInicio };
+}
+
 function churnRender(){
   const period = document.getElementById('churn-period-select').value;
   const planFilter = document.getElementById('churn-plan-select').value;
@@ -4207,13 +4261,29 @@ function churnRender(){
     return { key:k, monthStart, monthEnd, baseTotal, cancelMes, cancel, pct };
   });
 
+  // De maio/2026 em diante, sobrescreve com o churn calculado do banco (grupos que
+  // viraram FECHADO). A planilha parou de ser mantida nesse mês.
+  const _dbChurn = gruposChurnPorMes();
+  monthData.forEach(d => {
+    if(d.monthStart >= CHURN_DB_CUTOFF){
+      d.cancel     = _dbChurn.saidas[d.key] || 0;
+      d.cancelMes  = _dbChurn.items[d.key] || [];
+      d.baseTotal  = _dbChurn.ativosNoInicio(d.monthStart);
+      d.pct        = d.baseTotal>0 ? (d.cancel/d.baseTotal*100) : 0;
+      d.fonteDB    = true;
+    }
+  });
+
   // KPI Churn Rate = média ponderada (total cancelamentos / soma das bases)
   const sumBase = monthData.reduce((a,b)=>a+b.baseTotal,0);
   const sumCancel = monthData.reduce((a,b)=>a+b.cancel,0);
   const rateMedio = sumBase>0 ? (sumCancel/sumBase*100) : 0;
 
-  document.getElementById('churn-kpi-total').textContent = total;
-  document.getElementById('churn-kpi-total-sub').textContent = period==='all'?'todo o histórico':'no período';
+  // Total combinado: planilha (até abr/26) + grupos do banco (mai/26+). sumCancel já
+  // soma os meses com a fonte certa em cada um.
+  document.getElementById('churn-kpi-total').textContent = sumCancel;
+  document.getElementById('churn-kpi-total-sub').textContent =
+    (period==='all'?'todo o histórico':'no período') + ' · planilha + grupos';
   // ───── KPI: Clientes Ativos vem da planilha "Controle dos Grupos" (fonte da verdade global) ─────
   const totalAtivosGlobal = _activeClientsData ? _activeClientsData.totalAtivos : 0;
   document.getElementById('churn-kpi-active').textContent = totalAtivosGlobal;
@@ -4222,7 +4292,7 @@ function churnRender(){
   document.getElementById('churn-kpi-tempo').textContent = avgTempo+' d';
   document.getElementById('churn-kpi-ltv').textContent = 'R$ '+avgLtv.toLocaleString('pt-BR',{minimumFractionDigits:0,maximumFractionDigits:0});
   document.getElementById('churn-kpi-retorno').textContent = taxaRetorno.toFixed(1)+'%';
-  document.getElementById('churn-kpi-retorno-sub').textContent = `${retornaram} de ${total} voltaram`;
+  document.getElementById('churn-kpi-retorno-sub').textContent = `${retornaram} de ${total} (planilha)`;
 
   const monthLabels = monthData.map(d=>{
     const [y,m] = d.key.split('-');
