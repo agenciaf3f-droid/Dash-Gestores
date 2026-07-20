@@ -1952,6 +1952,13 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const replyText = gf(row,'reply').trim();
     const replyTarget = detectReplyTarget(replyText, msgIndexByGroup[grpId]);
 
+    // Reply do cliente numa mensagem do BOT: resposta à automação (confirmar lembrete,
+    // responder lista de presença), não pedido ao time. Não abre atendimento.
+    if(!fromTeam && replyText){
+      const alvo = msgIndexByGroup[grpId] && msgIndexByGroup[grpId].get(replyText);
+      if(alvo && alvo.some(e => e.phone === AUTOMATION_NUMBER)) return;
+    }
+
     // Merge mentions + reply target (OR logic)
     const hasEdicao      = mentions.edicao      || replyTarget.edicao;
     const hasWebdesign   = mentions.webdesign   || replyTarget.webdesign;
@@ -5043,6 +5050,10 @@ function calculaLeadTimeRepasse(rows){
       else if(rtext && byText.has(rtext)) orig=byText.get(rtext);
       const replySetor  = orig && orig.who ? orig.who.setor : null;
       const replyClient = orig ? !orig.who : false;
+
+      // Reply do cliente numa mensagem do BOT: é resposta à automação (confirmar
+      // lembrete, responder lista de presença), não pedido ao time. Não abre bola.
+      if(!who && orig && orig.phone===AUTOMATION_NUMBER) continue;
 
       if(!who){
         // ── CLIENTE ──
