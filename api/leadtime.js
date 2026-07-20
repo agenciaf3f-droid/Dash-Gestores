@@ -59,16 +59,34 @@ export default async function handler(req, res) {
     return sendJson(res, 504, { error: "upstream timeout" });
   }
 
-  const body = await r.text();
+  let body = await r.text();
   if (!r.ok) {
     // Não vaza a resposta crua do upstream (pode conter detalhe de schema).
     console.error(`[leadtime] upstream ${r.status}: ${body.slice(0, 300)}`);
     return sendJson(res, 502, { error: `upstream error ${r.status}` });
   }
 
+  // Enxuga o payload: o campo Mensagem carrega descrições de IA de imagem (2000+
+  // caracteres) que o motor não usa, e textos longos. Cortar aqui derruba ~40% do
+  // que o navegador baixa. Corta Mensagem e Reply no MESMO limite para o casamento
+  // por texto de citação continuar batendo. Tag !MF1, "relatório em vídeo" e menção
+  // ficam no começo, então sobrevivem. O drill de conversa mostra o texto cortado.
+  try {
+    const parsed = JSON.parse(body);
+    if (Array.isArray(parsed)) {
+      const CAP = 300;
+      for (const row of parsed) {
+        if (row && typeof row.Mensagem === "string" && row.Mensagem.length > CAP) row.Mensagem = row.Mensagem.slice(0, CAP);
+        if (row && typeof row.Reply === "string" && row.Reply.length > CAP) row.Reply = row.Reply.slice(0, CAP);
+      }
+      body = JSON.stringify(parsed);
+    }
+  } catch {
+    // resposta não é o array esperado (ex.: sonda de id) — repassa como veio
+  }
+
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, private");
-  // content-range é usado pelo cliente quando pede count
   const cr = r.headers.get("content-range");
   if (cr) res.setHeader("Content-Range", cr);
   res.status(200).send(body);

@@ -1534,6 +1534,7 @@ async function fetchData(){
       const r = await fetch(`${endpoint}?select=id&order=id.desc&limit=1`, { headers, signal: AbortSignal.timeout(30000) });
       if(r.ok){ const j = await r.json(); if(Array.isArray(j) && j[0]) maxId = j[0].id; }
     } catch(_){}
+    if(maxId != null) window._lastKnownMaxId = maxId; // p/ o auto-refresh saber se há dado novo
 
     // Baixa UMA janela de ids por keyset (id>=cursor & id<hi, ordenado por id). Sempre usa o
     // índice da chave primária → NÃO faz varredura por OFFSET, então não estoura statement timeout.
@@ -5230,6 +5231,26 @@ function renderLeadTimeRepasse(){
     }
     _booted = true;
     fetchData();
+    startAutoRefresh();
+  }
+
+  // Atualização quase em tempo real: a cada 30s checa (barato, só o maior id) se
+  // chegou mensagem nova; só então re-renderiza — assim os gráficos não piscam à toa.
+  // Só com a aba visível: dashboard em segundo plano não gasta chamada.
+  let _autoRefreshTimer = null;
+  async function autoRefreshTick(){
+    if(document.visibilityState !== 'visible' || _isFetching) return;
+    try {
+      const r = await fetch(`${SUPA_ENDPOINT}?select=id&order=id.desc&limit=1`, { headers: await supaHeaders(), signal: AbortSignal.timeout(15000) });
+      if(!r.ok) return;
+      const j = await r.json();
+      const maxId = Array.isArray(j) && j[0] ? j[0].id : null;
+      if(maxId != null && maxId !== window._lastKnownMaxId){ reloadData(); }
+    } catch(_){ /* rede instável: tenta de novo no próximo tick */ }
+  }
+  function startAutoRefresh(){
+    if(_autoRefreshTimer) return;
+    _autoRefreshTimer = setInterval(autoRefreshTick, 30000);
   }
 
   function reset(){
@@ -5237,6 +5258,7 @@ function renderLeadTimeRepasse(){
     _rosterLoaded = false;
     _dataLoaded = false;
     _isFetching = false;
+    if(_autoRefreshTimer){ clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
   }
 
   authClient.auth.getSession().then(({ data }) => {
