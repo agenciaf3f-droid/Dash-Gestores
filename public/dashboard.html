@@ -4135,7 +4135,18 @@ function gruposChurnPorMes(){
   for(const [g, arr] of byG){
     arr.sort((a,b)=>a.dt-b.dt);
     const inicio = arr[0].dt;
-    const idx = arr.findIndex(m => isGrupoFechado(m.nome));
+    // Vale o ÚLTIMO estado do nome, não a primeira vez que o marcador apareceu.
+    // 4 grupos foram renomeados de volta (tiraram o FECHADO) — um deles seguiu
+    // com 67 mensagens por mais 50 dias. Pela regra antiga o grupo saía da base
+    // de "ativos no dia 01" para sempre, mas também não contava como churn: o
+    // cliente sumia da conta dos dois lados. Se a última mensagem não tem o
+    // marcador, o grupo está aberto; se tem, a saída é o começo da sequência
+    // fechada final.
+    let idx = -1;
+    if(isGrupoFechado(arr[arr.length-1].nome)){
+      idx = arr.length - 1;
+      while(idx > 0 && isGrupoFechado(arr[idx-1].nome)) idx--;
+    }
     const bornFechado = idx === 0;               // já nasceu fechado -> não dá pra datar a saída
     let fim = idx >= 0 ? arr[idx].dt : null;
     if(idx > 0){
