@@ -1,7 +1,8 @@
 # Trocar o n8n pela ingestão direta da UAZAPI
 
-Estado em 21/07/2026. O n8n continua sendo a **única** fonte do banco. Nada do que
-está no ar mudou o dashboard.
+Estado em 21/07/2026, fim de tarde. **A escrita direta está ligada** desde ~15:10:
+endpoint e n8n gravam em paralelo na mesma tabela, e o índice único descarta o que
+repetir. Falta só o corte da instância 1 (passo 7).
 
 ## Por que estamos fazendo isso
 
@@ -69,7 +70,7 @@ create index if not exists uazapi_raw_recebido_idx on public.uazapi_raw (recebid
 Estavam sem webhook (`enabled=false` e `null`), então ligar não desviou nada.
 Config anterior salva. A inst1 segue no n8n.
 
-### ⬜ 4. Fechar o mapa de `Tipo`
+### ✅ 4. Fechar o mapa de `Tipo` — feito
 
 Descoberto nas amostras reais:
 
@@ -83,7 +84,9 @@ Descoberto nas amostras reais:
 | media | DocumentMessage | document | **novo — o banco não tem esse tipo hoje** |
 | reaction | ReactionMessage | — | **novo — hoje o n8n grava como Texto** |
 
-Ainda falta amostra de **figurinha** e **clique de botão**.
+Fechado depois com amostra real: figurinha (`StickerMessage` → Figurinha) e clique
+de botão (`ButtonsResponseMessage`, text vazio, rótulo em `vote`). O mapa completo
+está em `api/_uazapi-map.js`.
 
 **Achado importante:** o banco hoje só tem `Texto/Áudio/Imagem/Vídeo/Botão`. Não existe
 "Reação" nem "Figurinha". Ou seja, o n8n hoje grava reação como se fosse mensagem de
@@ -92,7 +95,7 @@ por isso existe a função `soEmoji()` no dashboard, adivinhando pelo conteúdo.
 
 Com `type=reaction` vindo de graça da UAZAPI, isso deixa de ser adivinhação.
 
-### ⬜ 5. Ligar a escrita real, em paralelo
+### ✅ 5. Ligar a escrita real, em paralelo — feito (21/07 ~15:10)
 
 Antes, limpar as duplicatas que já existem e criar o índice:
 
@@ -111,11 +114,31 @@ create unique index if not exists msgs_grupo_msgid_uniq
 O índice é parcial de propósito: 97.128 linhas antigas têm `message_id` nulo e
 precisam continuar existindo.
 
-O endpoint passa a escrever com `Prefer: resolution=ignore-duplicates`. O n8n **continua
-rodando** — as duas escritas convivem, e o índice descarta o que repetir.
+O `ignore-duplicates` do PostgREST não serviu: o índice é parcial e o Postgres não
+casa `ON CONFLICT` com índice parcial. Em vez disso o endpoint trata **409 como
+sucesso** — é o caminho esperado de ~44% dos webhooks. O n8n **continua rodando** —
+as duas escritas convivem, e o índice descarta o que repetir.
 
 Enriquecimento de `Gestor` e `Status`: a planilha *Controle dos Grupos* já está publicada
 em CSV e tem `ID do Grupo` nos dois formatos. Não precisa de acesso novo ao Google.
+
+### ✅ 5b. Só grupo que a planilha conhece — feito
+
+Na primeira tarde de escrita apareceram três grupos que o n8n nunca gravou:
+**UPLOADER PRO, UPLoader ESPARTA e UPLOADERS #23** — comunidades de uploaders que
+as instâncias 2 e 3 escutam, não cliente. O dashboard agrega qualquer linha, então
+virariam "clientes" sem gestor.
+
+O critério que separa cliente de resto já existe: os 106 grupos que o n8n gravou na
+última semana resolvem todos na planilha; os três UPLOADER, não. O webhook passou a
+ignorar grupo que a planilha (carregada) não conhece; planilha fora do ar deixa a
+mensagem entrar sem enriquecimento. As 7 linhas UPLOADER gravadas foram apagadas
+(continuam em `uazapi_raw`).
+
+No mesmo passo, as mensagens capturadas **antes** de a escrita entrar no ar
+(14:11–15:10) foram reprocessadas de `uazapi_raw`: **25 mensagens de cliente
+recuperadas**, sendo 17 da EDINEUMA (a cliente invisível) e as imagens que o n8n
+perdeu na janela da comparação. Zero duplicata: o índice segurou o resto.
 
 ### ✅ 6. Comparação — primeira rodada (21/07, ~50 min de captura)
 
@@ -161,13 +184,35 @@ mídia — o caminho em que o n8n chama a IA para descrever a imagem. Amostra pe
 Por alguns dias, conferir: contagem por hora, mensagens que o n8n gravou e o endpoint
 não (e vice-versa), e se `Tipo`/`Horário`/`Número` batem linha a linha.
 
+**Segunda rodada (21/07, janela 15:10–15:30 com escrita no ar):** 36 mensagens
+capturadas = 36 na tabela, 0 falha de escrita, 0 que só o n8n viu. Na interseção
+do dia (112 mensagens), divergência zero em `Tipo`, `Número` e `Nome`; 1 divergência
+de `Horário` de **2 segundos** — o n8n usa o relógio dele, o endpoint usa o
+`messageTimestamp` da mensagem. O formato da linha é o mesmo.
+
 ### ⬜ 7. Cortar
 
 Apontar a inst1 para o endpoint, desligar o webhook do n8n. Manter o n8n parado, não
 apagado, por uma semana.
 
+Precisa do **token da inst1** (de propósito, nenhum token de instância ficou salvo
+em disco). Com ele:
+
+```
+POST {servidor-uazapi}/webhook   (header: token da inst1)
+{ "enabled": true, "url": "https://<dominio>/api/uazapi-hook?s=<UAZAPI_HOOK_SECRET>&i=1",
+  "events": ["messages"], "excludeMessages": ["wasSentByApi"] }
+```
+
+(Conferir o corpo exato contra a config atual da inst2/inst3 com `GET /webhook` antes
+de aplicar; o backup do estado anterior das duas está em `webhook-backup.json` da
+sessão.)
+
 ## Pendências que não são de código
 
+- **Preencher o `Gestor Responsável` da EDINEUMA na planilha.** O grupo resolve
+  (status Ativo) mas a célula de gestor está vazia — as linhas dela entram com
+  `Gestor` nulo até alguém preencher.
 - **Rotacionar a chave da OpenAI.** `GET /instance/status` da inst1 devolve
   `openai_apikey` em texto puro para quem tiver o token da instância.
 - **Rotacionar a `sb_secret_`** do projeto de dados.
