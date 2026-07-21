@@ -861,8 +861,8 @@ authClient.auth.onAuthStateChange((_event, session) => {
     </div>
   </div>
 
-  <!-- Charts row 2 — Relatórios por Semana + Relatório em Vídeo (side by side) -->
-  <div id="chart-grid">
+  <!-- Charts row 2 — Relatórios por Semana (largura cheia) -->
+  <div id="chart-grid" style="grid-template-columns:1fr;">
     <div class="chart-card chart-clickable">
       <div class="chart-header">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -872,16 +872,6 @@ authClient.auth.onAuthStateChange((_event, session) => {
         <div class="chart-sub">Faltam enviar vs enviados</div>
       </div>
       <div class="chart-wrap"><canvas id="chart-rel"></canvas></div>
-    </div>
-    <div class="chart-card chart-clickable">
-      <div class="chart-header">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div class="chart-title">Relatório em Vídeo</div>
-          <span style="font-size:.65rem;color:var(--text-2);font-weight:500;">· clique para detalhes</span>
-        </div>
-        <div class="chart-sub">Faltam enviar vs enviados (cadência 14 dias)</div>
-      </div>
-      <div class="chart-wrap"><canvas id="chart-video-rel"></canvas></div>
     </div>
   </div>
 
@@ -1310,7 +1300,6 @@ let dpView  = { year:new Date().getFullYear(), month:new Date().getMonth() };
 let chartLT         = null;
 let chartRel        = null;
 let chartGestorTypes = null;
-let chartVideoRel    = null;
 let COL             = {};
 
 /* ================================================================
@@ -1816,15 +1805,20 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const meta    = grpMeta[grpId];
     const msgs    = (grpGestorMsgsAll[grpId] || []).slice().sort((a,b) => a.dt - b.dt);
 
-    // Find the most recent !MFx command sent by the gestor
+    // Find the most recent !MFx command sent by the gestor.
+    // reportDates guarda TODOS os envios, não só o último: o gráfico semanal
+    // olha 2 meses para trás e, com só o último, toda semana antiga aparecia
+    // com zero enviados mesmo tendo tido relatório.
     let lastCmdMsg = null;
+    const reportDts = [];
     for(let i = msgs.length - 1; i >= 0; i--){
       if(REPORT_TAGS.some(t => msgs[i].msgText.includes(t))){
-        lastCmdMsg = msgs[i];
-        break;
+        if(!lastCmdMsg) lastCmdMsg = msgs[i];
+        reportDts.push(msgs[i].dt);
       }
     }
     meta.lastReportCmd = lastCmdMsg ? lastCmdMsg.dt : null;
+    meta.reportDates   = reportDts;
 
     // reportDays: days since lastReportCmd
     if(meta.lastReportCmd){
@@ -1939,6 +1933,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
         id: grpId, name: meta.name, plan: meta.plan,
         gestor: meta.gestor, status: meta.status,
         lastReport:    meta.lastReportCmd,
+        reportDates:   meta.reportDates || [],
         reportDays:    meta.reportDays,
         prevAudioMins: meta.prevAudioMins,
         lastVideoReport: meta.lastVideoReport,
@@ -2433,7 +2428,6 @@ const set = (id,v) => { document.getElementById(id).textContent = v; };
 // Stores drill-down data for click handlers (rebuilt each renderCharts call)
 window._drillLT  = {}; // gestor → [caso, ...]
 let _drillWks = {}; // wkey   → { needed:[g,...], sent:[g,...] }
-let _drillVideoWks = {}; // wkey → { needed:[g,...], sent:[g,...] }
 
 // Escreve o valor de cada barra em cima dela. Plugin inline de propósito:
 // chartjs-plugin-datalabels seria mais um <script> de CDN só para isto, e o
@@ -2604,12 +2598,17 @@ function renderCharts(){
   });
 
   // ── 2) Reports by Week ──
+  // Janela fixa de 2 meses, de propósito fora do filtro de período: isto é
+  // acompanhamento de cadência semanal, e com o filtro em 7 dias o gráfico
+  // virava uma barra só. Muda o filtro, este gráfico não muda.
+  const relFim = today();
+  const relIni = new Date(relFim.getFullYear(), relFim.getMonth() - 2, relFim.getDate());
   _drillWks = {};
   const weeks = {};
   groupData.forEach(g => {
     if(!/ativo/i.test(g.status)) return;
-    let d = new Date(weekMonday(dpStart));
-    while(d <= dpEnd){
+    let d = new Date(weekMonday(relIni));
+    while(d <= relFim){
       const wk = isoWeek(d);
       if(!weeks[wk]) weeks[wk] = { needed:0, sent:0 };
       if(!_drillWks[wk]) _drillWks[wk] = { needed:[], sent:[], label:'' };
@@ -2617,13 +2616,13 @@ function renderCharts(){
       _drillWks[wk].needed.push(g);
       d = addDays(d, 7);
     }
-    if(g.lastReport){
-      const wk = isoWeek(g.lastReport);
-      if(weeks[wk]){
-        weeks[wk].sent++;
-        _drillWks[wk].sent.push(g);
-      }
-    }
+    // Uma semana com dois relatórios do mesmo grupo conta uma vez só, senão
+    // "enviados" passa de "faltam enviar" e a barra empilhada fica sem sentido.
+    new Set((g.reportDates || []).map(isoWeek)).forEach(wk => {
+      if(!weeks[wk]) return;
+      weeks[wk].sent++;
+      _drillWks[wk].sent.push(g);
+    });
   });
   const wkeys   = Object.keys(weeks).sort();
   const wkLabels= wkeys.map(w => {
@@ -2719,103 +2718,6 @@ function renderCharts(){
       scales:{
         x:{ stacked:false, grid:{display:false}, ticks:{color:'#9ca3af',font:{size:10,family:"'Inter',sans-serif"},maxRotation:20}, border:{display:false} },
         y:{ stacked:false, grid:{color:'#f3f4f6'}, ticks:{color:'#9ca3af',font:{size:11,family:"'Inter',sans-serif"}}, border:{display:false} }
-      }
-    }
-  });
-
-  // ── 4) Video Reports by Week & Gestor ──
-  const VIDEO_PHRASE = 'Segue o seu relatório em vídeo referente';
-  // Build video weeks: needed (every other week per active group) vs sent
-  _drillVideoWks = {};
-  const videoWeeks = {};
-
-  // Collect all video reports sent per week per group
-  const videoSentByWeekGroup = {};
-  rawRows.forEach(row => {
-    const msgText = gf(row,'msg').trim();
-    if(!msgText.includes(VIDEO_PHRASE)) return;
-    const dt = parseDateTime(row);
-    if(!dt) return;
-    const dDay = new Date(dt); dDay.setHours(0,0,0,0);
-    if(dDay < dpStart || dDay > dpEnd) return;
-    const grpId = gf(row,'groupId').trim();
-    const wk = isoWeek(dt);
-    if(!videoSentByWeekGroup[wk]) videoSentByWeekGroup[wk] = new Set();
-    videoSentByWeekGroup[wk].add(grpId);
-  });
-
-  // For each active group, every other week needs a video report (14-day cadence)
-  // Simplified: each group needs 1 video report every 2 weeks
-  // We'll mark odd weeks as "needed" for simplicity
-  const allWeekKeys = new Set();
-  groupData.forEach(g => {
-    if(!/ativo/i.test(g.status)) return;
-    let d = new Date(weekMonday(dpStart));
-    let weekIdx = 0;
-    while(d <= dpEnd){
-      const wk = isoWeek(d);
-      allWeekKeys.add(wk);
-      if(!videoWeeks[wk]) videoWeeks[wk] = { needed:0, sent:0 };
-      if(!_drillVideoWks[wk]) _drillVideoWks[wk] = { needed:[], sent:[], label:'' };
-      // Every other week this group needs a video report
-      if(weekIdx % 2 === 0){
-        videoWeeks[wk].needed++;
-        _drillVideoWks[wk].needed.push(g);
-      }
-      // Check if sent
-      if(videoSentByWeekGroup[wk] && videoSentByWeekGroup[wk].has(g.id)){
-        videoWeeks[wk].sent++;
-        _drillVideoWks[wk].sent.push(g);
-      }
-      d = addDays(d, 7);
-      weekIdx++;
-    }
-  });
-
-  const vwKeys = [...allWeekKeys].sort();
-  const vwLabels = vwKeys.map(w => {
-    const [yr,wn] = w.split('-W');
-    const lbl = `Sem ${wn}/${yr.slice(2)}`;
-    if(_drillVideoWks[w]) _drillVideoWks[w].label = lbl;
-    return lbl;
-  });
-
-  const vrCtx = document.getElementById('chart-video-rel').getContext('2d');
-  if(chartVideoRel) chartVideoRel.destroy();
-  chartVideoRel = new Chart(vrCtx, {
-    type:'bar',
-    data:{
-      labels: vwLabels.length ? vwLabels : ['Sem dados'],
-      datasets:[
-        { label:'Enviados', data:vwKeys.map(w=>videoWeeks[w]?.sent||0),
-          backgroundColor:'rgba(22,163,74,0.6)', borderColor:'rgba(22,163,74,0.85)',
-          borderWidth:2, borderRadius:6, borderSkipped:false },
-        { label:'Faltam Enviar', data:vwKeys.map(w=>Math.max(0,(videoWeeks[w]?.needed||0)-(videoWeeks[w]?.sent||0))),
-          backgroundColor:'rgba(239,68,68,0.18)', borderColor:'rgba(239,68,68,0.7)',
-          borderWidth:2, borderRadius:6, borderSkipped:false }
-      ]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      onHover:(e,els) => { vrCtx.canvas.style.cursor = els.length ? 'pointer' : 'default'; },
-      onClick:(e, els) => {
-        if(!els.length) return;
-        const idx   = els[0].index;
-        const dsIdx = els[0].datasetIndex; // 0=Enviados, 1=Faltam
-        const wk    = vwKeys[idx];
-        const lbl   = vwLabels[idx];
-        const drill = _drillVideoWks[wk] || { needed:[], sent:[], label:lbl };
-        const missing = drill.needed.filter(g => !drill.sent.some(s => s.id === g.id));
-        if(dsIdx === 0) openDrillVideoSent(lbl, drill.sent);
-        else            openDrillVideoNeeded(lbl, missing);
-      },
-      plugins:{
-        legend:{ position:'bottom', labels:{ color:'#9ca3af', font:{size:11,family:"'Inter',sans-serif"}, boxWidth:10, padding:16 } },
-        tooltip:{ callbacks:{ label:c=>`${c.dataset.label}: ${c.raw} · clique para detalhes` } }
-      },
-      scales:{
-        y:{ stacked:true, grid:{color:'#f3f4f6'}, ticks:{color:'#9ca3af',font:{size:11,family:"'Inter',sans-serif"},stepSize:1}, border:{display:false} },
-        x:{ stacked:true, grid:{display:false}, ticks:{color:'#9ca3af',font:{size:10,family:"'Inter',sans-serif"}}, border:{display:false} }
       }
     }
   });
@@ -3275,77 +3177,6 @@ function openDrillWeekSent(wkLabel, groups){
 
   openDrill(`Detalhes — Relatórios Enviados (${wkLabel})`,
     `${groups.length} grupo${groups.length!==1?'s':''} enviaram relatório nesta semana`,
-    body);
-}
-
-/* ================================================================
-   DRILL 5 — VÍDEO NECESSÁRIOS
-   ================================================================ */
-function openDrillVideoNeeded(wkLabel, groups){
-  const rows = groups.map(g => {
-    const name = esc(g.name || g.id);
-    const gest = esc(g.gestor || '—');
-    let vBadge = g.lastVideoReport
-      ? (() => {
-          const days = Math.round((new Date() - g.lastVideoReport) / 86400000);
-          return days <= 14
-            ? `<span class="badge badge-green">${days}d atrás</span>`
-            : `<span class="badge badge-red">${days}d atrás</span>`;
-        })()
-      : '<span class="badge badge-red">Sem vídeo</span>';
-    return `<tr>
-      <td>${wkLabel}</td>
-      <td><div style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${name}">${name}</div>
-          <div style="font-size:.65rem;color:var(--text-2);">${esc(g.id)}</div></td>
-      <td>${gest}</td>
-      <td>Grupo ativo sem vídeo na quinzena</td>
-      <td>${vBadge}</td>
-    </tr>`;
-  }).join('');
-
-  const body = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-      <span class="drill-count-pill" style="background:#fef2f2;color:#dc2626;border-color:rgba(239,68,68,.2);">Faltam Enviar: ${groups.length}</span>
-    </div>
-    <div style="overflow-x:auto;"><table class="drill-table">
-      <thead><tr><th>Semana</th><th>Grupo</th><th>Gestor</th><th>Motivo</th><th>Último Vídeo</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-2);">Nenhum grupo</td></tr>'}</tbody>
-    </table></div>`;
-
-  openDrill(`Detalhes — Vídeos Faltam Enviar (${wkLabel})`,
-    `${groups.length} grupo${groups.length!==1?'s':''} ainda não enviaram relatório em vídeo`,
-    body);
-}
-
-/* ================================================================
-   DRILL 6 — VÍDEO ENVIADOS
-   ================================================================ */
-function openDrillVideoSent(wkLabel, groups){
-  const rows = groups.map(g => {
-    const name = esc(g.name || g.id);
-    const gest = esc(g.gestor || '—');
-    const vDt  = g.lastVideoReport ? fmtDT(g.lastVideoReport) : '—';
-    return `<tr>
-      <td>${wkLabel}</td>
-      <td><div style="font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${name}">${name}</div>
-          <div style="font-size:.65rem;color:var(--text-2);">${esc(g.id)}</div></td>
-      <td>${gest}</td>
-      <td style="white-space:nowrap;">${vDt}</td>
-      <td><span class="badge badge-green">✅ Enviado</span></td>
-    </tr>`;
-  }).join('');
-
-  const body = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-      <span class="drill-count-pill" style="background:#f0fdf4;color:#15803d;border-color:rgba(22,163,74,.2);">Enviados: ${groups.length}</span>
-    </div>
-    <div style="overflow-x:auto;"><table class="drill-table">
-      <thead><tr><th>Semana</th><th>Grupo</th><th>Gestor</th><th>Data envio</th><th>Status</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-2);">Nenhum grupo</td></tr>'}</tbody>
-    </table></div>`;
-
-  openDrill(`Detalhes — Vídeos Enviados (${wkLabel})`,
-    `${groups.length} grupo${groups.length!==1?'s':''} enviaram relatório em vídeo`,
     body);
 }
 
