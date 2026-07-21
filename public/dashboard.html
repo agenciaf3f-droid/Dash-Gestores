@@ -905,13 +905,11 @@ authClient.auth.onAuthStateChange((_event, session) => {
             <th onclick="sortBy('msgs')">Mensagens</th>
             <th onclick="sortBy('avgLT')">Lead Time</th>
             <th onclick="sortBy('silenceDays')">Dias sem msg</th>
-            <th onclick="sortBy('prevReport')">Relatório anterior</th>
             <th onclick="sortBy('reportDays')">Status relatório</th>
-            <th onclick="sortBy('videoReportDays')">Relatório em Vídeo</th>
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="9" style="padding:40px 24px;text-align:center;">
+          <tr><td colspan="7" style="padding:40px 24px;text-align:center;">
             <div class="sk" style="width:100%;height:16px;margin-bottom:10px;"></div>
             <div class="sk" style="width:88%;height:16px;margin-bottom:10px;"></div>
             <div class="sk" style="width:94%;height:16px;"></div>
@@ -2350,7 +2348,7 @@ function renderAll(){
 
 function renderEmpty(){
   document.getElementById('tbody').innerHTML=
-    '<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--text-2);">Nenhum dado disponível no período</td></tr>';
+    '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-2);">Nenhum dado disponível no período</td></tr>';
   document.getElementById('table-count').textContent='0 grupos';
 }
 
@@ -3212,8 +3210,6 @@ function renderTable(){
   // PONTO 4: Use prevReport_sort for prevReport column sorting
   const sorted = [...groupData].sort((a,b) => {
     let sk = sortKey;
-    // Map prevReport column to numeric sort key
-    if(sk === 'prevReport') sk = 'prevReport_sort';
     let va = a[sk] ?? null, vb = b[sk] ?? null;
     if(va===null && vb===null) return 0;
     if(va===null) return 1;
@@ -3226,7 +3222,7 @@ function renderTable(){
 
   // Update sort indicators
   const ths    = document.querySelectorAll('#thead th');
-  const keyMap = ['name','plan','gestor','msgs','avgLT','silenceDays','prevReport','reportDays','videoReportDays'];
+  const keyMap = ['name','plan','gestor','msgs','avgLT','silenceDays','reportDays'];
   ths.forEach((th,i) => {
     th.classList.remove('sort-asc','sort-desc');
     if(keyMap[i]===sortKey) th.classList.add(sortDir===-1?'sort-desc':'sort-asc');
@@ -3234,7 +3230,7 @@ function renderTable(){
 
   if(!sorted.length){
     document.getElementById('tbody').innerHTML=
-      '<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--text-2);">Nenhum grupo no período selecionado</td></tr>';
+      '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-2);">Nenhum grupo no período selecionado</td></tr>';
     return;
   }
 
@@ -3266,18 +3262,6 @@ function renderTable(){
       silCell = `<span class="badge badge-red">${g.silenceDays}d atrás</span>`;
     }
 
-    // ── "Relatório anterior" — áudio enviado pelo gestor em até 1h após !MFx? ──
-    // g.prevAudioMins: null = sem !MFx histórico ou sem áudio; number = minutos até o áudio
-    let prevRptCell;
-    if(g.lastReport === null){
-      // Nunca houve comando !MFx
-      prevRptCell = '<span style="color:var(--text-2);font-size:.73rem;">—</span>';
-    } else if(g.prevAudioMins !== null){
-      prevRptCell = `<span class="badge badge-green">✅ Áudio em ${g.prevAudioMins} min</span>`;
-    } else {
-      prevRptCell = '<span class="badge badge-red">❌ Sem áudio</span>';
-    }
-
     // ── "Status do Relatório" — usa lastReport do dataset_completo ──
     // PONTO 5: "0d" → "Hoje"
     let rptBadge;
@@ -3305,15 +3289,7 @@ function renderTable(){
       <td><strong>${g.msgs.length.toLocaleString('pt-BR')}</strong></td>
       <td>${ltCell}</td>
       <td>${silCell}</td>
-      <td>${prevRptCell}</td>
       <td>${rptBadge}</td>
-      <td>${(() => {
-        if(!g.lastVideoReport) return '<span style="color:var(--text-2);font-size:.73rem;">—</span>';
-        const dtStr = fmtDT(g.lastVideoReport);
-        if(g.videoReportDays === 0) return '<span class="badge badge-green">Hoje</span><div class="cell-sub">' + dtStr + '</div>';
-        if(g.videoReportDays <= 14) return '<span class="badge badge-green">' + g.videoReportDays + 'd atrás</span><div class="cell-sub">' + dtStr + '</div>';
-        return '<span class="badge badge-red">' + g.videoReportDays + 'd atrás</span><div class="cell-sub">' + dtStr + '</div>';
-      })()}</td>
     </tr>`;
   }).join('');
 }
