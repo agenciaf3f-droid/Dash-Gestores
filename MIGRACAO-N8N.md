@@ -1,8 +1,8 @@
 # Trocar o n8n pela ingestão direta da UAZAPI
 
-Estado em 21/07/2026, fim de tarde. **A escrita direta está ligada** desde ~15:10:
-endpoint e n8n gravam em paralelo na mesma tabela, e o índice único descarta o que
-repetir. Falta só o corte da instância 1 (passo 7).
+**Corte feito em 21/07/2026 às 15:43.** As três instâncias apontam para o endpoint;
+o n8n não recebe mais nada e fica parado, como backup, por uma semana. O dashboard
+não depende mais dele.
 
 ## Por que estamos fazendo isso
 
@@ -190,23 +190,27 @@ do dia (112 mensagens), divergência zero em `Tipo`, `Número` e `Nome`; 1 diver
 de `Horário` de **2 segundos** — o n8n usa o relógio dele, o endpoint usa o
 `messageTimestamp` da mensagem. O formato da linha é o mesmo.
 
-### ⬜ 7. Cortar
+### ✅ 7. Cortar — feito (21/07 15:43)
 
-Apontar a inst1 para o endpoint, desligar o webhook do n8n. Manter o n8n parado, não
-apagado, por uma semana.
-
-Precisa do **token da inst1** (de propósito, nenhum token de instância ficou salvo
-em disco). Com ele:
+O webhook existente da inst1 (que apontava para o n8n no Railway) foi atualizado no
+lugar, para `/api/uazapi-hook?s=…&i=1`. Detalhe da API: `POST /webhook` exige o campo
+`action` — sem ele devolve `400 {"error":"Invalid action"}` e não muda nada. O corpo
+que funcionou:
 
 ```
-POST {servidor-uazapi}/webhook   (header: token da inst1)
-{ "enabled": true, "url": "https://<dominio>/api/uazapi-hook?s=<UAZAPI_HOOK_SECRET>&i=1",
-  "events": ["messages"], "excludeMessages": ["wasSentByApi"] }
+POST {servidor}/webhook   (header: token da inst1)
+{ "action": "update", "id": "<id do webhook>", "enabled": true,
+  "url": "https://<dominio>/api/uazapi-hook?s=<segredo>&i=1",
+  "events": ["messages"], "excludeMessages": [] }
 ```
 
-(Conferir o corpo exato contra a config atual da inst2/inst3 com `GET /webhook` antes
-de aplicar; o backup do estado anterior das duas está em `webhook-backup.json` da
-sessão.)
+Verificado ponta a ponta: ~1 minuto após o corte, mensagem da inst1 chegou em
+`uazapi_raw` com `i=1` e virou exatamente **1 linha** na tabela (Áudio, gestor
+certo). A config antiga (URL do Railway) está em `webhook-backup.json` da sessão,
+junto com o estado pré-migração da inst2 e inst3.
+
+O n8n **não recebe mais nada** — não precisou mexer nele. Fica parado uma semana
+como plano de volta; depois, desativar o workflow.
 
 ## Pendências que não são de código
 
@@ -216,7 +220,11 @@ sessão.)
 - **Rotacionar a chave da OpenAI.** `GET /instance/status` da inst1 devolve
   `openai_apikey` em texto puro para quem tiver o token da instância.
 - **Rotacionar a `sb_secret_`** do projeto de dados.
-- **Trocar o `UAZAPI_HOOK_SECRET`** ao final (foi exposto em conversa).
+- **Trocar o `UAZAPI_HOOK_SECRET`** (foi exposto em conversa).
+- **Rotacionar os tokens das três instâncias** depois que o corte estabilizar —
+  também circularam em conversa. Atenção: outros sistemas usam esses tokens para
+  **enviar** mensagem (n8n, edge functions do f3f-auto-ads via
+  `UAZAPI_INSTANCE_TOKEN`); rotacionar exige atualizar lá também.
 
 ## Como desfazer
 
