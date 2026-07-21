@@ -3485,6 +3485,13 @@ function switchTab(tabId){
   const btns = document.querySelectorAll('.tab-btn');
   const idx = tabId==='tab1' ? 0 : tabId==='tab2' ? 1 : 2;
   if(btns[idx]) btns[idx].classList.add('active');
+  // O topo direito (contador de registros, período e recarregar) é da aba de
+  // relatórios: mexe em rawRows e no filtro de datas, que o NPS não usa — ele
+  // tem o próprio seletor de mês e o próprio botão de atualizar. Some no NPS.
+  const topoDireita = document.querySelector('.topbar-right');
+  if(topoDireita) topoDireita.style.display = (tabId === 'tab2') ? 'none' : 'flex';
+  if(tabId === 'tab2') closeDatePicker();   // se o calendário estava aberto, fecha junto
+
   // Lazy init
   if(tabId==='tab2' && !window._npsInitialized){
     window._npsInitialized = true;
