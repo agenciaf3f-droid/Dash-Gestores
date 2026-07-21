@@ -2426,9 +2426,16 @@ const set = (id,v) => { document.getElementById(id).textContent = v; };
 window._drillLT  = {}; // gestor → [caso, ...]
 let _drillWks = {}; // wkey   → { needed:[g,...], sent:[g,...] }
 
-// Escreve o valor de cada barra em cima dela. Plugin inline de propósito:
-// chartjs-plugin-datalabels seria mais um <script> de CDN só para isto, e o
-// dashboard já demora para carregar. Barra zerada não recebe rótulo.
+// Escreve o valor de cada barra em cima dela, em 01h50m. Plugin inline de
+// propósito: chartjs-plugin-datalabels seria mais um <script> de CDN só para
+// isto, e o dashboard já demora para carregar. Barra zerada não recebe rótulo.
+// Formato próprio: o fmtMins do resto do dash escreve "50 min" abaixo de 1h e
+// "1h50" acima, o que deixa a fila de rótulos desalinhada. Aqui é sempre
+// HHhMMm, com zero à esquerda, para as barras ficarem comparáveis de bate-pronto.
+const hhmmBarra = m => {
+  m = Math.max(0, Math.round(m));
+  return `${String(Math.floor(m/60)).padStart(2,'0')}h${String(m%60).padStart(2,'0')}m`;
+};
 const rotuloBarras = {
   id: 'rotuloBarras',
   afterDatasetsDraw(chart){
@@ -2443,7 +2450,7 @@ const rotuloBarras = {
       chart.getDatasetMeta(i).data.forEach((barra, j) => {
         const v = ds.data[j];
         if(!v) return;
-        ctx.fillText(Math.round(v).toLocaleString('pt-BR'), barra.x, barra.y - 4);
+        ctx.fillText(hhmmBarra(v), barra.x, barra.y - 4);
       });
     });
     ctx.restore();
