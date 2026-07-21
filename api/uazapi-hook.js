@@ -48,6 +48,11 @@ export default async function handler(req, res) {
 
   const evento = payload.event || payload.type || payload.EventType || null;
 
+  // A UAZAPI manda o token da própria instância dentro de cada webhook. Guardar isso
+  // seria deixar a credencial das três instâncias parada no banco, em texto puro, em
+  // cada linha. Some antes de gravar — a instância eu já sei pela URL (?i=).
+  if (payload && typeof payload === "object" && "token" in payload) delete payload.token;
+
   const dataUrl = process.env.SUPABASE_DATA_URL;
   const serviceKey = process.env.SUPABASE_DATA_SERVICE_KEY;
   if (dataUrl && serviceKey) {
