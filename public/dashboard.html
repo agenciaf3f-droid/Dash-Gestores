@@ -2457,16 +2457,18 @@ function renderCharts(){
 
   // ── pessoas dos outros setores no mesmo gráfico ──
   // O gráfico se chama "Lead Time da equipe", então edição/webdesign/estratégia
-  // entram junto dos gestores, cada pessoa como sua própria barra. Prefixo de
-  // emoji (o mesmo dos KPIs) separa o setor visualmente. Só quando não há filtro
-  // de gestor ativo — esse filtro é específico de gestor de tráfego.
+  // entram junto dos gestores, cada pessoa como sua própria barra. Só quando não
+  // há filtro de gestor ativo — esse filtro é específico de gestor de tráfego.
+  // A barra é a pessoa, sem prefixo de setor: se alguém aparecer nas duas pontas
+  // (é gestor e também atende outro setor), as duas viram uma barra só, que é o
+  // lead time real daquela pessoa.
   if(!window._activeGestorFilter){
     const setoresEquipe = [
-      { emoji: '✏️', cases: window._ltCasesEdicao },
-      { emoji: '🎨', cases: window._ltCasesWebdesign },
-      { emoji: '📊', cases: window._ltCasesEstrategia },
+      window._ltCasesEdicao,
+      window._ltCasesWebdesign,
+      window._ltCasesEstrategia,
     ];
-    setoresEquipe.forEach(({ emoji, cases }) => {
+    setoresEquipe.forEach(cases => {
       (cases || []).forEach(caso => {
         if(caso.leadMins == null) return;
         // Ancora no telefone (estável, vem do roster), não no nome do WhatsApp —
@@ -2477,7 +2479,7 @@ function renderCharts(){
         // saber quem respondeu): descarta. Barra "Sem nome" com média absurda só
         // sujaria o gráfico — melhor não inventar dono.
         if(!reg) return;
-        const key = emoji + ' ' + reg.nome;
+        const key = reg.nome;
         if(!ltMap[key]) ltMap[key] = [];
         ltMap[key].push(caso.leadMins);
         if(!window._drillLT[key]) window._drillLT[key] = [];
