@@ -2421,6 +2421,30 @@ window._drillLT  = {}; // gestor → [caso, ...]
 let _drillWks = {}; // wkey   → { needed:[g,...], sent:[g,...] }
 let _drillVideoWks = {}; // wkey → { needed:[g,...], sent:[g,...] }
 
+// Escreve o valor de cada barra em cima dela. Plugin inline de propósito:
+// chartjs-plugin-datalabels seria mais um <script> de CDN só para isto, e o
+// dashboard já demora para carregar. Barra zerada não recebe rótulo.
+const rotuloBarras = {
+  id: 'rotuloBarras',
+  afterDatasetsDraw(chart){
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.font = "600 10px 'Inter',sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    chart.data.datasets.forEach((ds, i) => {
+      if(!chart.isDatasetVisible(i)) return;
+      ctx.fillStyle = ds.borderColor || '#6b7280';
+      chart.getDatasetMeta(i).data.forEach((barra, j) => {
+        const v = ds.data[j];
+        if(!v) return;
+        ctx.fillText(Math.round(v).toLocaleString('pt-BR'), barra.x, barra.y - 4);
+      });
+    });
+    ctx.restore();
+  }
+};
+
 function renderCharts(){
   // ── 1) Lead Time by Gestor ──
   window._drillLT = {};
@@ -2508,6 +2532,7 @@ function renderCharts(){
   if(chartLT) chartLT.destroy();
   chartLT = new Chart(ltCtx, {
     type:'bar',
+    plugins:[rotuloBarras],
     data:{
       labels: ltLabels.length ? ltLabels : ['Sem dados'],
       datasets:[
@@ -2531,6 +2556,7 @@ function renderCharts(){
     },
     options:{
       responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top:16 } },   // espaço para o rótulo da barra mais alta
       onHover:(e,els) => { ltCtx.canvas.style.cursor = els.length ? 'pointer' : 'default'; },
       onClick:(e, els) => {
         if(!els.length) return;
