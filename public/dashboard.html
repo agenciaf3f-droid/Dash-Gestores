@@ -880,9 +880,9 @@ authClient.auth.onAuthStateChange((_event, session) => {
     <div class="chart-card">
       <div class="chart-header">
         <div class="chart-title">Respostas da equipe</div>
-        <div class="chart-sub">Distribuição por tipo: Áudio, Texto e Imagem</div>
+        <div class="chart-sub">Como cada um responde: texto, áudio ou mídia</div>
       </div>
-      <div class="chart-wrap" style="height:260px;"><canvas id="chart-gestor-types"></canvas></div>
+      <div id="respostas-table"></div>
     </div>
   </div>
 
@@ -1299,7 +1299,6 @@ let dpView  = { year:new Date().getFullYear(), month:new Date().getMonth() };
 
 let chartLT         = null;
 let chartRel        = null;
-let chartGestorTypes = null;
 let COL             = {};
 
 /* ================================================================
@@ -2454,6 +2453,15 @@ const rotuloBarras = {
 };
 
 function renderCharts(){
+  // "#N/A", "-", vazio: lixo da coluna Gestor da planilha, não é pessoa. Mesma lista
+  // que populateFilters usa — repetida aqui de propósito porque lá ela é local
+  // àquela função (const dentro de populateFilters), fora do alcance daqui.
+  const LIXO_GESTOR = ['#n/a', '#ref!', '#valor!', 'n/a', '', '-', '—'];
+  const nomeValido = (n) => {
+    const s = String(n||'').trim().toLowerCase();
+    return s && !LIXO_GESTOR.includes(s);
+  };
+
   // ── 1) Lead Time by Gestor ──
   window._drillLT = {};
   const ltMap = {};
@@ -2695,32 +2703,48 @@ function renderCharts(){
     });
   });
 
-  const gtLabels  = Object.keys(typeMap).sort();
-  const audioData = gtLabels.map(n => typeMap[n].audio);
-  const textoData = gtLabels.map(n => typeMap[n].texto);
-  const imagemData= gtLabels.map(n => typeMap[n].imagem);
+  // Tabela (era gráfico de barras agrupadas): as três barras por pessoa obrigavam
+  // a comparar altura para saber o mix, e a proporção — que é o que interessa
+  // aqui — não aparecia em lugar nenhum. Agora vem o número e o percentual.
+  const respostas = Object.keys(typeMap).filter(nomeValido).map(nome => {
+    const t = typeMap[nome];
+    const total = t.texto + t.audio + t.imagem;
+    const pct = v => total ? Math.round(v * 100 / total) : 0;
+    // O terceiro percentual é o resto, não um arredondamento próprio: com três
+    // Math.round independentes a linha fecha 101% de vez em quando. A sobra cai
+    // em mídia, que é sempre a menor fatia.
+    const pTexto = pct(t.texto), pAudio = pct(t.audio);
+    return { nome, total, texto:t.texto, audio:t.audio, midia:t.imagem,
+             pTexto, pAudio, pMidia: total ? Math.max(0, 100 - pTexto - pAudio) : 0 };
+  }).filter(r => r.total > 0).sort((a,b) => b.total - a.total);
 
-  const gtCtx = document.getElementById('chart-gestor-types').getContext('2d');
-  if(chartGestorTypes) chartGestorTypes.destroy();
-  chartGestorTypes = new Chart(gtCtx, {
-    type:'bar',
-    data:{
-      labels: gtLabels.length ? gtLabels : ['Sem dados'],
-      datasets:[
-        { label:'Áudio',  data:audioData,  backgroundColor:'rgba(139,92,246,0.18)', borderColor:'rgba(139,92,246,0.75)', borderWidth:2, borderRadius:6, borderSkipped:false },
-        { label:'Texto',  data:textoData,  backgroundColor:'rgba(8,102,255,0.14)',  borderColor:'rgba(8,102,255,0.75)',  borderWidth:2, borderRadius:6, borderSkipped:false },
-        { label:'Imagem', data:imagemData, backgroundColor:'rgba(16,185,129,0.15)', borderColor:'rgba(16,185,129,0.75)', borderWidth:2, borderRadius:6, borderSkipped:false }
-      ]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ position:'bottom', labels:{ color:'#9ca3af', font:{size:11,family:"'Inter',sans-serif"}, boxWidth:10, padding:16 } } },
-      scales:{
-        x:{ stacked:false, grid:{display:false}, ticks:{color:'#9ca3af',font:{size:10,family:"'Inter',sans-serif"},maxRotation:20}, border:{display:false} },
-        y:{ stacked:false, grid:{color:'#f3f4f6'}, ticks:{color:'#9ca3af',font:{size:11,family:"'Inter',sans-serif"}}, border:{display:false} }
-      }
+  const alvoResp = document.getElementById('respostas-table');
+  if(alvoResp){
+    if(!respostas.length){
+      alvoResp.innerHTML = '<div class="open-vazio">Nenhuma resposta no período</div>';
+    } else {
+      alvoResp.innerHTML = `
+        <div style="overflow-x:auto;">
+        <table class="open-table">
+          <thead><tr>
+            <th>Pessoa</th>
+            <th class="num">Texto</th><th class="num">%</th>
+            <th class="num">Áudio</th><th class="num">%</th>
+            <th class="num">Mídia</th><th class="num">%</th>
+          </tr></thead>
+          <tbody>
+            ${respostas.map(r => `
+              <tr>
+                <td class="open-pessoa">${esc(r.nome)}</td>
+                <td class="num">${r.texto.toLocaleString('pt-BR')}</td><td class="num">${r.pTexto}%</td>
+                <td class="num">${r.audio.toLocaleString('pt-BR')}</td><td class="num">${r.pAudio}%</td>
+                <td class="num">${r.midia.toLocaleString('pt-BR')}</td><td class="num">${r.pMidia}%</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>`;
     }
-  });
+  }
 
   // ── 5) Open Tickets by Gestor + Edição + Webdesign ──
   const openByG = window._openByGestor || {};
@@ -2742,15 +2766,6 @@ function renderCharts(){
     if(nome === '🎨 Webdesign')  return openWeb;
     if(nome === '📊 Estratégia') return openEst;   // faltava antes: Estratégia caía no openByG e vinha vazia
     return openByG[nome] || [];
-  };
-
-  // "#N/A", "-", vazio: lixo da coluna Gestor da planilha, não é pessoa. Mesma lista
-  // que populateFilters usa — repetida aqui de propósito porque lá ela é local
-  // àquela função (const dentro de populateFilters), fora do alcance daqui.
-  const LIXO_GESTOR = ['#n/a', '#ref!', '#valor!', 'n/a', '', '-'];
-  const nomeValido = (n) => {
-    const s = String(n||'').trim().toLowerCase();
-    return s && !LIXO_GESTOR.includes(s);
   };
 
   const linhas = openLabels.filter(nomeValido).map(nome => {
