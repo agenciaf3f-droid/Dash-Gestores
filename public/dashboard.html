@@ -1992,9 +1992,16 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     // basta: reply_to_id só existe em 39 deles (message_id falta em 94% das linhas).
     if(!fromTeam && typeRaw === 'Botão') return;
 
-    // Reação de cliente (só emoji): não abre atendimento. Vale para todas as trilhas
-    // — reagir não é pedido. De membro do time conta normal (não passa por aqui, cai
-    // nos ramos de fromGestor/fromEdicao/etc. e fecha o ticket).
+    // Reação e figurinha de cliente não abrem atendimento: reagir não é pedido.
+    // Vale para todas as trilhas. De membro do time conta normal (não passa por
+    // aqui, cai nos ramos de fromGestor/fromEdicao/etc. e fecha o ticket).
+    //
+    // Duas checagens, uma por era dos dados. A ingestão nova marca Tipo "Reação" e
+    // "Figurinha" direto da UAZAPI — é exato. As linhas antigas, gravadas pelo n8n,
+    // não têm esses tipos: reação virava Texto com o emoji (daí o soEmoji) e
+    // figurinha virava Imagem, indistinguível de uma foto de verdade — por isso
+    // figurinha antiga continua contando, e não há como consertar retroativamente.
+    if(!fromTeam && (typeRaw === 'Reação' || typeRaw === 'Figurinha')) return;
     if(!fromTeam && soEmoji(msgText)) return;
 
     /* ── MULTI-TRACK STATE MACHINE ── */
@@ -2686,9 +2693,13 @@ function renderCharts(){
     }
   });
 
-  // ── 3) Gestor Responses by Type (Áudio / Texto / Imagem) ──
+  // ── 3) Gestor Responses by Type (Áudio / Texto / Mídia) ──
+  // Figurinha, documento e contato passaram a existir como Tipo com a ingestão nova
+  // e entram em mídia — sem isto cairiam no balde de texto e inflariam a coluna
+  // Texto da tabela. Reação fica FORA da conta: reagir não é responder o cliente.
   const TYPE_AUDIO  = /audio|áudio|voz|voice|ptt/i;
-  const TYPE_IMAGE  = /imagem|image|foto|photo|sticker|video|vídeo/i;
+  const TYPE_IMAGE  = /imagem|image|foto|photo|sticker|figurinha|video|vídeo|documento|document|contato|vcard/i;
+  const TYPE_REACAO = /^reação$|^reacao$|^reaction$/i;
 
   const typeMap = {};
   // Only initialize gestors that match the filter (or all if no filter)
@@ -2701,7 +2712,8 @@ function renderCharts(){
     g.gestorMsgs.forEach(m => {
       const name = g.gestor || '—';
       if(!typeMap[name]) typeMap[name] = { audio:0, texto:0, imagem:0 };
-      const t = (m.type || '').toLowerCase();
+      const t = (m.type || '').trim();
+      if(TYPE_REACAO.test(t))      return;              // reagir não é responder
       if(TYPE_AUDIO.test(t))       typeMap[name].audio++;
       else if(TYPE_IMAGE.test(t))  typeMap[name].imagem++;
       else                         typeMap[name].texto++;
