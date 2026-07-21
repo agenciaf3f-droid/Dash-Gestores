@@ -128,13 +128,28 @@ body {
 }
 
 /* ── KPI GRID ── */
+/* Duas fileiras: em cima os 4 números de manchete, embaixo a quebra de lead time
+   por setor — mesmos cards, menores, para não competir com a linha de cima. */
 #kpi-grid {
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
-  gap:14px; margin-bottom:28px;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px; margin-bottom:14px;
 }
-@media(max-width:1100px){ #kpi-grid { grid-template-columns:repeat(3,1fr); } }
-@media(max-width:640px)  { #kpi-grid { grid-template-columns:repeat(2,1fr); } }
+#kpi-grid-lt {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px; margin-bottom:28px;
+}
+#kpi-grid-lt .kpi-card { padding:14px 16px; }
+#kpi-grid-lt .kpi-icon { width:28px; height:28px; border-radius:8px; font-size:14px; margin-bottom:10px; }
+#kpi-grid-lt .kpi-value { font-size:1.3rem; margin-bottom:4px; }
+@media(max-width:1100px){
+  #kpi-grid, #kpi-grid-lt { grid-template-columns:repeat(2,1fr); }
+}
+@media(max-width:640px){
+  #kpi-grid    { grid-template-columns:repeat(2,1fr); }
+  #kpi-grid-lt { grid-template-columns:repeat(2,1fr); }
+}
 
 .kpi-card {
   background:var(--surface); border-radius:var(--radius);
@@ -433,6 +448,35 @@ tbody td { padding:14px 18px; color:var(--text); vertical-align:middle; }
 .log-table tbody tr:last-child { border-bottom:none; }
 .log-table tbody td { padding:9px 12px; vertical-align:top; }
 .log-msg { max-width:360px; word-break:break-word; line-height:1.45; }
+
+/* Tabela de conversas em aberto (por pessoa) — substitui o gráfico de barras.
+   A linha inteira é o gatilho do popover com os clientes daquela pessoa. */
+.open-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.open-table thead th {
+  padding:9px 14px; text-align:left; font-size:.62rem; font-weight:700;
+  letter-spacing:.07em; text-transform:uppercase; color:var(--text-2);
+  background:#f9fafb; border-bottom:1px solid var(--border); white-space:nowrap;
+}
+.open-table thead th.num, .open-table tbody td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.open-table tbody tr { border-bottom:1px solid #f3f4f6; position:relative; cursor:default; }
+.open-table tbody tr:last-child { border-bottom:none; }
+.open-table tbody tr:hover { background:#fffbeb; }
+.open-table tbody td { padding:10px 14px; }
+.open-pessoa { font-weight:600; color:var(--text); }
+.open-qtd { font-weight:700; color:#b45309; }
+.open-vazio { padding:22px; text-align:center; color:var(--text-2); font-size:.82rem; }
+/* popover com os clientes em aberto — aparece no hover da linha */
+.open-pop {
+  display:none; position:absolute; left:14px; top:100%; z-index:40;
+  background:#111827; color:#f9fafb; border-radius:8px; padding:10px 12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.28); min-width:260px; max-width:420px;
+  font-size:.72rem; line-height:1.5; white-space:normal;
+}
+.open-table tbody tr:hover .open-pop { display:block; }
+.open-pop b { color:#fbbf24; display:block; margin-bottom:5px; font-size:.66rem;
+  text-transform:uppercase; letter-spacing:.06em; }
+.open-pop div { display:flex; justify-content:space-between; gap:14px; padding:2px 0; }
+.open-pop span.t { color:#fcd34d; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .log-hl-open   { background:#fff9c2 !important; }
 .log-hl-closed { background:#d4f7e0 !important; }
 
@@ -742,30 +786,30 @@ authClient.auth.onAuthStateChange((_event, session) => {
       <div class="kpi-value" id="kpi-leadtime"><span class="sk" style="width:56px;height:30px;"></span></div>
       <div class="kpi-label">Lead Time médio da equipe</div>
     </div>
+  </div>
+
+  <!-- Quebra por setor: mesma informação do card "da equipe" acima, só que
+       separada. Menor de propósito — é detalhe, não manchete. -->
+  <div id="kpi-grid-lt">
+    <div class="kpi-card">
+      <div class="kpi-icon" style="background:#fff7ed;">🚀</div>
+      <div class="kpi-value" id="kpi-lt-trafego"><span class="sk" style="width:52px;height:22px;"></span></div>
+      <div class="kpi-label">Lead Time Tráfego</div>
+    </div>
     <div class="kpi-card">
       <div class="kpi-icon" style="background:#f3e8ff;">✏️</div>
-      <div class="kpi-value" id="kpi-lt-edicao"><span class="sk" style="width:56px;height:30px;"></span></div>
+      <div class="kpi-value" id="kpi-lt-edicao"><span class="sk" style="width:52px;height:22px;"></span></div>
       <div class="kpi-label">Lead Time Edição</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon" style="background:#fff7ed;">🎨</div>
-      <div class="kpi-value" id="kpi-lt-webdesign"><span class="sk" style="width:56px;height:30px;"></span></div>
-      <div class="kpi-label">Lead Time Webdesign</div>
-     </div>
-     <div class="kpi-card">
-       <div class="kpi-icon" style="background:#e0f2fe;">📊</div>
-       <div class="kpi-value" id="kpi-lt-estrategia"><span class="sk" style="width:56px;height:30px;"></span></div>
-       <div class="kpi-label">Lead Time Estratégia</div>
-     </div>
-    <div class="kpi-card">
-      <div class="kpi-icon" style="background:#fef9c3;">📋</div>
-      <div class="kpi-value" id="kpi-rel-needed"><span class="sk" style="width:40px;height:30px;"></span></div>
-      <div class="kpi-label">Relatórios necessários</div>
+      <div class="kpi-value" id="kpi-lt-webdesign"><span class="sk" style="width:52px;height:22px;"></span></div>
+      <div class="kpi-label">Lead Time Designer</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-icon" style="background:#ecfdf5;">📨</div>
-      <div class="kpi-value" id="kpi-rel-sent"><span class="sk" style="width:40px;height:30px;"></span></div>
-      <div class="kpi-label">Relatórios enviados</div>
+      <div class="kpi-icon" style="background:#e0f2fe;">📊</div>
+      <div class="kpi-value" id="kpi-lt-estrategia"><span class="sk" style="width:52px;height:22px;"></span></div>
+      <div class="kpi-label">Lead Time Estratégia</div>
     </div>
   </div>
 
@@ -811,9 +855,9 @@ authClient.auth.onAuthStateChange((_event, session) => {
     <div class="chart-card">
       <div class="chart-header">
         <div class="chart-title">⏳ Conversas em Aberto da equipe</div>
-        <div class="chart-sub">Quantidade de conversas aguardando resposta do time</div>
+        <div class="chart-sub">Aguardando resposta do time · passe o mouse na linha para ver os clientes</div>
       </div>
-      <div class="chart-wrap" style="height:220px;"><canvas id="chart-open-tickets"></canvas></div>
+      <div id="open-tickets-table"></div>
     </div>
   </div>
 
@@ -1253,7 +1297,6 @@ let chartLT         = null;
 let chartRel        = null;
 let chartGestorTypes = null;
 let chartVideoRel    = null;
-let chartOpenTickets = null;
 let COL             = {};
 
 /* ================================================================
@@ -2144,6 +2187,11 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const st = grpState[grpId];
     if(!st.gestor.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    // Mesmos cortes do bloco de casos acima: grupo parado há mais de ABANDONO_DIAS
+    // não é "aguardando resposta", é grupo morto. E cliente que já saiu (FECHADO no
+    // nome) não fica na fila do time — se ninguém falou depois do rename, o pendente
+    // antigo nunca era zerado pela máquina de estado e ficava aberto para sempre.
+    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
     const gestorName = g.gestor || '—';
     if(!openByGestor[gestorName]) openByGestor[gestorName] = [];
     openByGestor[gestorName].push({
@@ -2160,6 +2208,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   Object.keys(grpState).forEach(grpId => {
     const st = grpState[grpId]; if(!st.edicao.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
     openByEdicao.push({ grpId, grpName: g.name || grpId, pendente_desde: st.edicao.desde, leadMins: bizMins(st.edicao.desde, new Date()) });
   });
   window._openByEdicao = openByEdicao;
@@ -2168,6 +2217,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   Object.keys(grpState).forEach(grpId => {
     const st = grpState[grpId]; if(!st.webdesign.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
     openByWebdesign.push({ grpId, grpName: g.name || grpId, pendente_desde: st.webdesign.desde, leadMins: bizMins(st.webdesign.desde, new Date()) });
   });
   window._openByWebdesign = openByWebdesign;
@@ -2176,6 +2226,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   Object.keys(grpState).forEach(grpId => {
     const st = grpState[grpId]; if(!st.estrategia.desde) return;
     const g = grpMap[grpId]; if(!g) return;
+    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
     openByEstrategia.push({ grpId, grpName: g.name || grpId, pendente_desde: st.estrategia.desde, leadMins: bizMins(st.estrategia.desde, new Date()) });
   });
   window._openByEstrategia = openByEstrategia;
@@ -2328,12 +2379,6 @@ function renderKPIs(){
   });
   const avgLT = allLeadValues.length ? allLeadValues.reduce((a,b) => a+b, 0) / allLeadValues.length : null;
 
-  const mon       = weekMonday(today());
-  const sun       = addDays(mon, 6);
-  const activeGrps= groupData.filter(g => /ativo/i.test(g.status));
-  const relNeeded = activeGrps.length;
-  const relSent   = activeGrps.filter(g => g.lastReport && g.lastReport >= mon && g.lastReport <= sun).length;
-
   // Edição LT
   const ltEdicaoAll = window._ltCasesEdicao || [];
   const edicaoValues = ltEdicaoAll.map(c => c.leadMins).filter(v => v != null);
@@ -2362,11 +2407,10 @@ function renderKPIs(){
   set('kpi-active',    active || groupData.length);
   set('kpi-gestores',  gestorSet.size || '—');
   set('kpi-leadtime',  fmtMins(avgLTEquipe));
+  set('kpi-lt-trafego', fmtMins(avgLT));
   set('kpi-lt-edicao', fmtMins(avgLTEdicao));
   set('kpi-lt-webdesign', fmtMins(avgLTWeb));
   set('kpi-lt-estrategia', fmtMins(avgLTEst));
-  set('kpi-rel-needed',relNeeded);
-  set('kpi-rel-sent',  relSent);
 }
 
 const set = (id,v) => { document.getElementById(id).textContent = v; };
@@ -2746,69 +2790,66 @@ function renderCharts(){
   if(openWeb.length) allOpenLabels.push('🎨 Webdesign');
   if(openEst.length) allOpenLabels.push('📊 Estratégia');
   const openLabels = allOpenLabels.sort();
-  const openData = openLabels.map(g => {
-    if(g === '✏️ Edição') return openEdic.length;
-    if(g === '🎨 Webdesign') return openWeb.length;
-    if(g === '📊 Estratégia') return openEst.length;
-    return (openByG[g] || []).length;
-  });
-  const openColors = openLabels.map(g => {
-    if(g === '✏️ Edição') return { bg:'rgba(124,58,237,0.18)', border:'rgba(124,58,237,0.85)' };
-    if(g === '🎨 Webdesign') return { bg:'rgba(194,65,12,0.18)', border:'rgba(194,65,12,0.85)' };
-    if(g === '📊 Estratégia') return { bg:'rgba(6,182,212,0.18)', border:'rgba(6,182,212,0.85)' };
-    return { bg:'rgba(245,158,11,0.18)', border:'rgba(245,158,11,0.85)' };
-  });
+  // Tabela (era gráfico de barras): por pessoa, quantas conversas em aberto e há
+  // quanto tempo em média. Passar o mouse na linha lista os clientes daquela pessoa.
+  // A barra só dava a quantidade; a média e os nomes ficavam escondidos no tooltip.
+  const ticketsDe = (nome) => {
+    if(nome === '✏️ Edição')     return openEdic;
+    if(nome === '🎨 Webdesign')  return openWeb;
+    if(nome === '📊 Estratégia') return openEst;   // faltava antes: Estratégia caía no openByG e vinha vazia
+    return openByG[nome] || [];
+  };
 
-  const openCtx = document.getElementById('chart-open-tickets').getContext('2d');
-  if(chartOpenTickets) chartOpenTickets.destroy();
-  chartOpenTickets = new Chart(openCtx, {
-    type:'bar',
-    data:{
-      labels: openLabels.length ? openLabels : ['Sem conversas em aberto'],
-      datasets:[{
-        label:'Conversas em aberto',
-        data: openLabels.length ? openData : [0],
-        backgroundColor: openLabels.length ? openColors.map(c=>c.bg) : ['rgba(245,158,11,0.18)'],
-        borderColor: openLabels.length ? openColors.map(c=>c.border) : ['rgba(245,158,11,0.85)'],
-        borderWidth:2, borderRadius:8, borderSkipped:false,
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      indexAxis:'y',
-      plugins:{
-        legend:{ display:false },
-        tooltip:{ callbacks:{
-          label: function(c){
-            const gname = openLabels[c.dataIndex];
-            let tickets;
-            if(gname === '✏️ Edição') tickets = openEdic;
-            else if(gname === '🎨 Webdesign') tickets = openWeb;
-            else tickets = openByG[gname] || [];
-            const avgMins = tickets.length ? Math.round(tickets.reduce((a,t)=>a+t.leadMins,0)/tickets.length) : 0;
-            return ` ${c.raw} conversa${c.raw!==1?'s':''} · Média: ${fmtMins(avgMins)}`;
-          },
-          afterBody: function(items){
-            const idx = items[0]?.dataIndex;
-            if(idx === undefined) return '';
-            const gname = openLabels[idx];
-            let tickets;
-            if(gname === '✏️ Edição') tickets = openEdic;
-            else if(gname === '🎨 Webdesign') tickets = openWeb;
-            else tickets = openByG[gname] || [];
-            if(!tickets.length) return '';
-            return tickets.slice(0,3).map(t =>
-              `  ⏳ ${t.grpName.substring(0,30)} — ${fmtMins(t.leadMins)}`
-            ).concat(tickets.length > 3 ? [`  ... e mais ${tickets.length-3}`] : []);
-          }
-        }}
-      },
-      scales:{
-        x:{ grid:{color:'#f3f4f6'}, ticks:{color:'#9ca3af',font:{size:11,family:"'Inter',sans-serif"},stepSize:1}, border:{display:false} },
-        y:{ grid:{display:false}, ticks:{color:'#374151',font:{size:11,weight:'600',family:"'Inter',sans-serif"}}, border:{display:false} }
-      }
+  // "#N/A", "-", vazio: lixo da coluna Gestor da planilha, não é pessoa. Mesma lista
+  // que populateFilters usa — repetida aqui de propósito porque lá ela é local
+  // àquela função (const dentro de populateFilters), fora do alcance daqui.
+  const LIXO_GESTOR = ['#n/a', '#ref!', '#valor!', 'n/a', '', '-'];
+  const nomeValido = (n) => {
+    const s = String(n||'').trim().toLowerCase();
+    return s && !LIXO_GESTOR.includes(s);
+  };
+
+  const linhas = openLabels.filter(nomeValido).map(nome => {
+    const ts = ticketsDe(nome);
+    const media = ts.length ? Math.round(ts.reduce((a,t)=>a+t.leadMins,0)/ts.length) : 0;
+    // mais antigo primeiro: é o que mais precisa de atenção
+    const ordenados = [...ts].sort((a,b)=>b.leadMins-a.leadMins);
+    return { nome, qtd: ts.length, media, ordenados };
+  }).filter(l => l.qtd > 0).sort((a,b) => b.qtd - a.qtd || b.media - a.media);
+
+  const alvo = document.getElementById('open-tickets-table');
+  if(alvo){
+    if(!linhas.length){
+      alvo.innerHTML = '<div class="open-vazio">Nenhuma conversa aguardando resposta 🎉</div>';
+    } else {
+      alvo.innerHTML = `
+        <div style="overflow-x:auto;">
+        <table class="open-table">
+          <thead><tr>
+            <th>Pessoa</th>
+            <th class="num">Em aberto</th>
+            <th class="num">Tempo médio</th>
+          </tr></thead>
+          <tbody>
+            ${linhas.map(l => `
+              <tr>
+                <td class="open-pessoa">${esc(l.nome)}
+                  <div class="open-pop">
+                    <b>${l.qtd} cliente${l.qtd!==1?'s':''} aguardando</b>
+                    ${l.ordenados.slice(0,12).map(t =>
+                      `<div><span>${esc(String(t.grpName).replace(/^\(?\s*FECHADO\s*\)?\s*/i,'').replace(/^F3F\s*-\s*/,'').substring(0,42))}</span><span class="t">${fmtMins(t.leadMins)}</span></div>`
+                    ).join('')}
+                    ${l.ordenados.length>12 ? `<div style="opacity:.65;">… e mais ${l.ordenados.length-12}</div>` : ''}
+                  </div>
+                </td>
+                <td class="num"><span class="open-qtd">${l.qtd}</span></td>
+                <td class="num">${fmtMins(l.media)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>`;
     }
-  });
+  }
 }
 
 /* ================================================================
