@@ -1144,6 +1144,20 @@ function isExcludedGestor(name){
   return EXCLUDED_GESTORS.some(g => n.includes(g));
 }
 
+// A coluna Gestor da planilha às vezes traz o setor no lugar da pessoa: em 3
+// grupos ela diz "Vídeos" ou "Edição", e nos três o único do time que fala é o
+// editor. Sem isto ele vira duas ou três barras/filtros diferentes, e o pedaço
+// dele fica escondido atrás de um nome de setor. O nome sai do roster
+// autenticado — este arquivo é público e não guarda nome de ninguém.
+const GESTOR_E_O_EDITOR = new Set(['vídeos','videos','vídeo','video','edição','edicao']);
+function nomeDoGestor(valor){
+  const v = String(valor || '').trim();
+  if(!GESTOR_E_O_EDITOR.has(v.toLowerCase())) return v;
+  const tel = [...EDICAO_PHONES][0];
+  const reg = tel && EQUIPE_POR_TELEFONE.get(tel);
+  return reg ? reg.nome : v;
+}
+
 // Grupo fechado. O marcador é escrito à mão e aparece em 4 formatos na base:
 //   "(FECHADO)F3F - X"  "( FECHADO ) F3F - X"  "F3F - (FECHADO) X"  "F3F - X (FECHADO)"
 // Por isso a busca é solta, sem âncora e sem exigir os parênteses — o regex
@@ -1758,7 +1772,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
 
   allSorted.forEach(row => {
     const grpId      = gf(row,'groupId').trim(); if(!grpId) return;
-    const gestorColH = gf(row,'gestorName').trim();
+    const gestorColH = nomeDoGestor(gf(row,'gestorName'));
     if(isExcludedGestor(gestorColH)) return;
 
     if(!grpMeta[grpId]) grpMeta[grpId] = {
