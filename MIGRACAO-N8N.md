@@ -117,7 +117,46 @@ rodando** — as duas escritas convivem, e o índice descarta o que repetir.
 Enriquecimento de `Gestor` e `Status`: a planilha *Controle dos Grupos* já está publicada
 em CSV e tem `ID do Grupo` nos dois formatos. Não precisa de acesso novo ao Google.
 
-### ⬜ 6. Comparar antes de cortar
+### ✅ 6. Comparação — primeira rodada (21/07, ~50 min de captura)
+
+Comparação feita **sem escrever nada**: o que as instâncias 2 e 3 capturaram, traduzido
+pelo mapeador, contra o que o n8n gravou na mesma janela.
+
+| | |
+|---|---|
+| mensagens distintas capturadas | 142 |
+| gravadas pelo n8n | 72 |
+| nas duas fontes | 71 |
+| divergência de `Tipo` nas 71 | **0** |
+| divergência de `Horário` nas 71 | **0** |
+
+O mapeador reproduz a saída do n8n exatamente nos campos que viram número.
+
+Das 71 que o n8n não gravou, 22 são de grupo F3F. Separando as duas causas:
+
+**Cobertura — 15 mensagens.** Todas de `F3F - EDINEUMA RODRIGUES de Sousa - Low-Ticket`,
+grupo onde o n8n **nunca** gravou nada: a instância 1 não está nele. Esse cliente é
+invisível para o dashboard hoje.
+
+**Perda real — 7 mensagens**, em 4 grupos onde o n8n gravou minutos antes e depois
+(ou seja, a instância 1 está lá). Reconferidas 10 minutos depois: continuavam ausentes,
+então não é atraso.
+
+```
+14:23:47  Imagem     F3F - Guilherme da Silva Fortunato - 1 FASE
+14:28:54  Imagem     F3F - Karine Xavier de Oliveira - Low-ticket
+14:51:01  Imagem     F3F - De Salles Treinamento e Produtos Digitais
+14:51:01  Imagem     F3F - De Salles Treinamento e Produtos Digitais
+14:51:15  Imagem     F3F - De Salles Treinamento e Produtos Digitais
+14:53:30  Figurinha  F3F - Mari Eiras - PREMIUM
+14:59:32  Reação     F3F - Mari Eiras - PREMIUM
+```
+
+**Cinco imagens, uma figurinha, uma reação. Nenhum texto.** A perda está concentrada em
+mídia — o caminho em que o n8n chama a IA para descrever a imagem. Amostra pequena
+(50 minutos), mas o padrão não parece acaso.
+
+### ⬜ 6b. Confirmar com mais tempo
 
 Por alguns dias, conferir: contagem por hora, mensagens que o n8n gravou e o endpoint
 não (e vice-versa), e se `Tipo`/`Horário`/`Número` batem linha a linha.
