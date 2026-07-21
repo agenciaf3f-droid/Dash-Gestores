@@ -763,6 +763,30 @@ authClient.auth.onAuthStateChange((_event, session) => {
     <span id="error-text"></span>
   </div>
 
+  <!-- Filter bar -->
+  <div id="filter-bar">
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="filter-label">Status:</span>
+      <select id="filter-status" class="filter-select" onchange="applyFilter()">
+        <option value="">Todos</option>
+        <option value="ativo">Ativos</option>
+        <option value="inativo">Inativos</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="filter-label">Plano:</span>
+      <select id="filter-plan" class="filter-select" onchange="applyFilter()">
+        <option value="">Todos os planos</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span class="filter-label">Gestor:</span>
+      <select id="filter-gestor" class="filter-select" onchange="applyFilter()">
+        <option value="">Todos os gestores</option>
+      </select>
+    </div>
+  </div>
+
   <!-- KPIs -->
   <div class="section-title">Indicadores do Período</div>
   <div id="kpi-grid">
@@ -810,30 +834,6 @@ authClient.auth.onAuthStateChange((_event, session) => {
       <div class="kpi-icon" style="background:#e0f2fe;">📊</div>
       <div class="kpi-value" id="kpi-lt-estrategia"><span class="sk" style="width:52px;height:22px;"></span></div>
       <div class="kpi-label">Lead Time Estratégia</div>
-    </div>
-  </div>
-
-  <!-- Filter bar -->
-  <div id="filter-bar">
-    <div style="display:flex;align-items:center;gap:6px;">
-      <span class="filter-label">Status:</span>
-      <select id="filter-status" class="filter-select" onchange="applyFilter()">
-        <option value="">Todos</option>
-        <option value="ativo">Ativos</option>
-        <option value="inativo">Inativos</option>
-      </select>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <span class="filter-label">Plano:</span>
-      <select id="filter-plan" class="filter-select" onchange="applyFilter()">
-        <option value="">Todos os planos</option>
-      </select>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <span class="filter-label">Gestor:</span>
-      <select id="filter-gestor" class="filter-select" onchange="applyFilter()">
-        <option value="">Todos os gestores</option>
-      </select>
     </div>
   </div>
 
