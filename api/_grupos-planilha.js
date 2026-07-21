@@ -76,6 +76,6 @@ export async function gestorStatusDoGrupo(grupoId) {
     }
     if (!cache) await baixando;   // primeira carga: espera. Depois, atualiza em segundo plano.
   }
-  if (!cache) return {};
-  return cache.get(idNumerico(grupoId)) || {};
+  if (!cache) return {};                           // planilha indisponível: segue sem enriquecer
+  return cache.get(idNumerico(grupoId)) || null;   // null: planilha carregada e o grupo não está nela
 }

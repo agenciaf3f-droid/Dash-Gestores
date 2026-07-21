@@ -93,7 +93,13 @@ export default async function handler(req, res) {
   if (!m || m.isGroup !== true) return res.status(200).json({ ok: true, ignorado: "não é grupo" });
 
   const grupoId = String(m.chatid || "").trim();
-  const { gestor, status } = await gestorStatusDoGrupo(grupoId);
+  // A planilha "Controle dos Grupos" é a lista de clientes. Grupo que ela não conhece
+  // (UPLOADER PRO etc.) não entra: o n8n nunca gravou esses grupos, e o dashboard os
+  // mostraria como cliente sem gestor. Planilha fora do ar devolve {} — a mensagem
+  // entra sem enriquecimento, porque perder cliente é pior que vazar grupo interno.
+  const info = await gestorStatusDoGrupo(grupoId);
+  if (info === null) return res.status(200).json({ ok: true, ignorado: "grupo fora da planilha" });
+  const { gestor, status } = info;
   const { linha, erro } = linhaDoWebhook(payload, () => ({ gestor, status }));
   if (erro) {
     console.error(`[uazapi-hook] não mapeou: ${erro}`);
