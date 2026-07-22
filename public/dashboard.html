@@ -1244,13 +1244,29 @@ function detectMentions(msgText){
   return mentions;
 }
 
+// A mensagem citada, achada pelo id — quando o dado permite.
+//
+// Duas eras convivem na base. O n8n gravava o TEXTO da citação na coluna Reply, e
+// achar o original só dava para fazer casando texto com texto (o que erra sempre
+// que duas pessoas escrevem "ok"). A ingestão da UAZAPI não resolve o texto, mas
+// grava reply_to_id: o id exato da mensagem citada. Onde ele existe, ele manda.
+//
+// Reação NÃO é citação. O reply_to_id de uma reação aponta para a mensagem que
+// recebeu o emoji; tratar isso como resposta faria o time "atender" um cliente só
+// por reagir — abrindo e fechando atendimento que nunca houve.
+function citacaoPorId(row, idxById){
+  if(gf(row,'type').trim() === 'Reação') return null;
+  const rid = gf(row,'replyToId').trim();
+  if(!rid || !idxById) return null;
+  return idxById.get(rid) || null;
+}
+
 // Detect direction via Reply (quoted message) — looks up original sender's phone
-function detectReplyTarget(replyText, msgIndexByGroup){
+function detectReplyTarget(replyText, msgIndexByGroup, citada){
   const result = { gestor: false, edicao: false, webdesign: false, estrategia: false };
-  if(!replyText || !msgIndexByGroup) return result;
-  const entries = msgIndexByGroup.get(replyText);
-  if(!entries || entries.length === 0) return result;
-  const originalPhone = entries[0].phone;
+  const entry = citada || (replyText && msgIndexByGroup ? (msgIndexByGroup.get(replyText) || [])[0] : null);
+  if(!entry) return result;
+  const originalPhone = entry.phone;
   if(isEdicaoPhone(originalPhone)) result.edicao = true;
   else if(isWebdesignPhone(originalPhone)) result.webdesign = true;
   else if(isEstrategiaPhone(originalPhone)) result.estrategia = true;
@@ -1260,8 +1276,14 @@ function detectReplyTarget(replyText, msgIndexByGroup){
 
 // Detect if a Reply points to a CLIENT message (non-team sender)
 // Returns { isClient, originalDt, originalPhone }
-function detectReplyToClient(replyText, msgIndex){
+function detectReplyToClient(replyText, msgIndex, citada){
   const result = { isClient: false, originalDt: null, originalPhone: null };
+  if(citada){
+    if(!isTeamPhone(citada.phone) && citada.dt){
+      return { isClient: true, originalDt: citada.dt, originalPhone: citada.phone };
+    }
+    return result;
+  }
   if(!replyText || !msgIndex) return result;
   const entries = msgIndex.get(replyText);
   if(!entries || entries.length === 0) return result;
@@ -1919,6 +1941,18 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     m.get(txt).push({ phone, dt });
   });
 
+  // Índice por message_id — o caminho exato para achar a mensagem citada.
+  // Inclui mensagem sem texto (áudio, imagem, figurinha): citar uma foto é comum, e
+  // o índice por texto nunca conseguiu enxergá-las. Inclui também a automação, que o
+  // guard de reply-ao-bot precisa reconhecer.
+  const msgByIdByGroup = {}; // grpId → Map<message_id, {phone, dt}>
+  sortedRows.forEach(row => {
+    const grpId = gf(row,'groupId').trim(); if(!grpId) return;
+    const mid   = gf(row,'messageId').trim(); if(!mid) return;
+    if(!msgByIdByGroup[grpId]) msgByIdByGroup[grpId] = new Map();
+    msgByIdByGroup[grpId].set(mid, { phone: normalizePhone(gf(row,'phone')), dt: parseDateTime(row) });
+  });
+
   sortedRows.forEach(row => {
     const grpId = gf(row,'groupId').trim(); if(!grpId) return;
     const meta  = grpMeta[grpId];
@@ -2007,12 +2041,15 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     /* ── MULTI-TRACK STATE MACHINE ── */
     const mentions = detectMentions(msgText);
     const replyText = gf(row,'reply').trim();
-    const replyTarget = detectReplyTarget(replyText, msgIndexByGroup[grpId]);
+    const citada = citacaoPorId(row, msgByIdByGroup[grpId]);
+    // Citação existe se o id resolveu OU se a era n8n deixou o texto citado.
+    const temCitacao = !!citada || !!replyText;
+    const replyTarget = detectReplyTarget(replyText, msgIndexByGroup[grpId], citada);
 
     // Reply do cliente numa mensagem do BOT: resposta à automação (confirmar lembrete,
     // responder lista de presença), não pedido ao time. Não abre atendimento.
-    if(!fromTeam && replyText){
-      const alvo = msgIndexByGroup[grpId] && msgIndexByGroup[grpId].get(replyText);
+    if(!fromTeam && temCitacao){
+      const alvo = citada ? [citada] : (msgIndexByGroup[grpId] && msgIndexByGroup[grpId].get(replyText));
       if(alvo && alvo.some(e => e.phone === AUTOMATION_NUMBER)) return;
     }
 
@@ -2061,9 +2098,9 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       if(st.edicao.desde){
         // Track already open → close it normally (no quote required)
         closeTrack(st.edicao, grpId, dt, senderPhone, senderNome, 'EDICAO', '', ltCasesEdicao, null);
-      } else if(replyText){
+      } else if(temCitacao){
         // Track NOT open — check if replying to a client message → retroactive open+close
-        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId]);
+        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId], citada);
         if(clientMsg.isClient && clientMsg.originalDt){
           const leadMins = bizMins(clientMsg.originalDt, dt);
           ltCasesEdicao.push({
@@ -2078,8 +2115,8 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       // ── WEBDESIGN message ──
       if(st.webdesign.desde){
         closeTrack(st.webdesign, grpId, dt, senderPhone, senderNome, 'WEBDESIGN', '', ltCasesWebdesign, null);
-      } else if(replyText){
-        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId]);
+      } else if(temCitacao){
+        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId], citada);
         if(clientMsg.isClient && clientMsg.originalDt){
           const leadMins = bizMins(clientMsg.originalDt, dt);
           ltCasesWebdesign.push({
@@ -2094,8 +2131,8 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       // ── ESTRATÉGIA message ──
       if(st.estrategia.desde){
         closeTrack(st.estrategia, grpId, dt, senderPhone, senderNome, 'ESTRATEGIA', '', ltCasesEstrategia, null);
-      } else if(replyText){
-        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId]);
+      } else if(temCitacao){
+        const clientMsg = detectReplyToClient(replyText, msgIndexByGroup[grpId], citada);
         if(clientMsg.isClient && clientMsg.originalDt){
           const leadMins = bizMins(clientMsg.originalDt, dt);
           ltCasesEstrategia.push({
