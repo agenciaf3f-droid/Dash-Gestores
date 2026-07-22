@@ -212,6 +212,34 @@ junto com o estado pré-migração da inst2 e inst3.
 O n8n **não recebe mais nada** — não precisou mexer nele. Fica parado uma semana
 como plano de volta; depois, desativar o workflow.
 
+### ✅ 8. Duas instâncias, não três (22/07)
+
+A inst3 saiu da ingestão a pedido. Antes de desligar, medida a perda de cobertura
+pela lista de grupos de cada instância (`GET /group/list`):
+
+| | grupos |
+|---|---|
+| união das três | 631 |
+| inst1 + inst2 | 619 |
+| só na inst3 | 12 — **nenhum é cliente** (todos fora da planilha) |
+
+Os 12 são grupo interno: "Globais 10 - Presencial/Online", "UPLoader Escala" e
+afins, que o webhook já ignorava. Perda de cliente: zero.
+
+**Achado no meio do caminho:** o webhook da inst3 não apontava mais para o nosso
+endpoint — tinha voltado para a URL do n8n no Railway. A inst3 entregou para nós
+até **10:37 de 22/07** e parou. Ninguém mexeu nisso pela mão; a suspeita é que o
+workflow do n8n reconfigure o webhook da instância sozinho quando roda.
+
+Não houve estrago: nas 331 linhas do dia não há nenhuma assinatura do n8n
+(coluna `Reply` preenchida, áudio transcrito, linha sem `message_id`), nenhuma
+duplicata, e os grupos que só a inst3 via já eram ignorados. O n8n recebeu e não
+escreveu.
+
+**Risco que fica:** se o workflow do n8n continuar ligado no Railway, ele pode
+repontar a inst1 ou a inst2 do mesmo jeito — e aí a ingestão para de verdade.
+Desligar o workflow no Railway deixou de ser faxina e virou prevenção.
+
 ## Pendências que não são de código
 
 - **Preencher o `Gestor Responsável` da EDINEUMA na planilha.** O grupo resolve
