@@ -1,7 +1,8 @@
 # Trilhas de atendimento — regra nova
 
-Escrito em 22/07/2026, a partir da regra descrita pelo Raphael. Ainda **não** está
-no código: hoje o dashboard usa o modelo antigo, descrito no fim.
+Escrito em 22/07/2026, a partir da regra descrita pelo Raphael. **No ar** desde
+22/07: `PASS 2.6` em `public/dashboard.html`. O modelo antigo, descrito no fim,
+continua valendo para trilha aberta antes do corte.
 
 ## A regra
 
@@ -32,6 +33,9 @@ a ninguém; dono é só de quem se espera a resposta enquanto ela está aberta.
 A única forma de responder **sem** fechar é marcar outro membro com `@`. Aí a
 mensagem vira repasse: a trilha passa a ser do marcado e o cronômetro continua
 correndo até ele responder.
+
+Basta o `@`. Não precisa citar a mensagem do cliente junto — marcar já é o
+suficiente para repassar.
 
 É a válvula da regra 2: se era algo que só o design podia resolver, o gestor
 marca o design, confirma que a trilha é dele, e segue falando no grupo sem
@@ -72,6 +76,23 @@ Regras que já existem hoje e continuam valendo:
 - Resposta do cliente a uma mensagem do bot não abre trilha.
 - Grupo fechado (marcado na planilha) não abre nem fecha trilha.
 - Grupo parado há mais de 45 dias não conta trilha aberta.
+
+## Conferência do motor (22/07)
+
+Seis cenários, montados à mão e passados pelo motor de verdade extraído do arquivo:
+
+| cenário | esperado | saiu |
+|---|---|---|
+| cliente pergunta, gestor responde | fecha, gestor | fechada GESTOR 5min |
+| gestor marca @design, fala de novo, design responde | repasse; fecha no design | fechada WEBDESIGN 15min |
+| cliente cita o design, gestor responde | fecha (dono não prende) | fechada GESTOR 5min |
+| gestor marca @design e ninguém responde | aberta, com o design | ABERTA WEBDESIGN |
+| cliente manda 3 seguidas | 1 trilha, desde a primeira | fechada 15min |
+| cliente só reage | não abre | nenhuma trilha |
+
+Nos dados reais, do corte até 22/07 16:30: 83 trilhas, 80 fechadas, média 23 min,
+nenhum tempo negativo. O Paulo (estratégia) fechou 15 — antes, todas essas ficavam
+abertas para sempre, porque estrategista não fechava trilha de gestor.
 
 ## Exemplos reais (21/07)
 

@@ -1234,6 +1234,36 @@ function isEdicaoPhone(phone){ return EDICAO_PHONES.has(phone); }
 function isWebdesignPhone(phone){ return WEBDESIGN_PHONES.has(phone); }
 function isEstrategiaPhone(phone){ return ESTRATEGIA_PHONES.has(phone); }
 
+// LID → telefone, aprendido dos próprios dados.
+//
+// O WhatsApp não escreve o telefone na marcação: escreve o LID interno da pessoa
+// ("@249159827382448"). O roster só conhece telefone, então comparar "@"+telefone
+// com o texto nunca casou — em 30 dias, 271 marcações apontaram para o time e
+// nenhuma foi reconhecida. Como cada linha guarda sender_lid e Número lado a lado,
+// quem já falou uma vez fica identificado, e a marcação passa a ser legível.
+let LID_TO_PHONE = new Map();
+
+// Telefones do time marcados nesta mensagem. Marcação de cliente não entra.
+function telefonesMarcados(msgText){
+  const out = [];
+  const tokens = String(msgText || '').match(/@(\d{8,})/g) || [];
+  tokens.forEach(tok => {
+    const id = tok.slice(1);
+    const tel = normalizePhone(LID_TO_PHONE.get(id) || id);
+    if(tel && isTeamPhone(tel) && !out.includes(tel)) out.push(tel);
+  });
+  return out;
+}
+
+function setorDoTelefone(p){
+  if(isEdicaoPhone(p))      return 'EDICAO';
+  if(isWebdesignPhone(p))   return 'WEBDESIGN';
+  if(isEstrategiaPhone(p))  return 'ESTRATEGIA';
+  if(isInvalidatorPhone(p)) return 'ESTRATEGIA';
+  if(isGestorPhone(p))      return 'GESTOR';
+  return null;
+}
+
 // Detect @mentions in message text
 function detectMentions(msgText){
   const mentions = { gestor: false, edicao: false, webdesign: false, estrategia: false };
@@ -1953,6 +1983,16 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     msgByIdByGroup[grpId].set(mid, { phone: normalizePhone(gf(row,'phone')), dt: parseDateTime(row) });
   });
 
+  // Mapa LID → telefone: quem já falou uma vez fica identificado, e a marcação
+  // "@249159827382448" passa a ser legível. Vale para a base inteira, não só para o
+  // grupo — a mesma pessoa tem o mesmo LID em todos.
+  LID_TO_PHONE = new Map();
+  sortedRows.forEach(row => {
+    const lid   = gf(row,'senderLid').trim().split('@')[0];
+    const phone = normalizePhone(gf(row,'phone'));
+    if(lid && phone) LID_TO_PHONE.set(lid, phone);
+  });
+
   sortedRows.forEach(row => {
     const grpId = gf(row,'groupId').trim(); if(!grpId) return;
     const meta  = grpMeta[grpId];
@@ -2231,24 +2271,166 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     });
   });
 
-  // Store open tickets per gestor for the chart (gestor track only)
-  const openByGestor = {};
-  Object.keys(grpState).forEach(grpId => {
-    const st = grpState[grpId];
-    if(!st.gestor.desde) return;
+  /* ================================================================
+     PASS 2.6 — MOTOR NOVO DE TRILHAS  (regra completa em TRILHAS.md)
+     ================================================================
+     Trilha deixa de ser por SETOR e passa a ser por PESSOA:
+
+       1. mensagem de cliente abre trilha. O dono é quem ela aponta — marcado
+          com @ ou dono da mensagem citada. Sem apontar ninguém, fica sem dono.
+       2. qualquer um do time que responder fecha, não importa o dono.
+       3. marcar outro membro com @ é repasse: não fecha, transfere o dono e o
+          cronômetro segue. Basta o @, não precisa citar.
+       3b. quem repassou não fecha aquela trilha depois — senão a mensagem
+          seguinte desfaria o próprio repasse.
+       5. o tempo conta para quem fechou, não para o gestor do grupo.
+
+     Roda sobre a série inteira (o estado depende do histórico), mas só entrega
+     trilha ABERTA a partir do corte. Antes do corte quem manda é o motor antigo,
+     logo acima — número que já foi apresentado não muda de valor retroativamente.
+  */
+  const TRILHA_NOVA_DESDE = new Date(2026, 6, 22, 0, 0, 0);   // 22/07/2026
+
+  const novoCases = { GESTOR: [], EDICAO: [], WEBDESIGN: [], ESTRATEGIA: [] };
+  const trilhasPorGrupo = {};   // grpId → Map<donoTelefone|'', trilha>
+
+  const guardaCaso = (caso) => {
+    const alvo = novoCases[caso.tipo] || novoCases.GESTOR;
+    alvo.push(caso);
+  };
+
+  sortedRows.forEach(row => {
+    const grpId = gf(row,'groupId').trim(); if(!grpId) return;
+    const meta  = grpMeta[grpId]; if(!meta) return;
+    if(isExcludedGestor(meta.gestor)) return;
+    const dt = parseDateTime(row); if(!dt) return;
+
+    if(!trilhasPorGrupo[grpId]) trilhasPorGrupo[grpId] = new Map();
+    const trilhas = trilhasPorGrupo[grpId];
+
+    const senderPhone = normalizePhone(gf(row,'phone'));
+    const senderNome  = gf(row,'sender').trim();
+    const msgText     = gf(row,'msg').trim();
+    const typeRaw     = gf(row,'type').trim();
+
+    if(senderPhone === AUTOMATION_NUMBER) return;
+    if(isGrupoFechado(gf(row,'groupName'))){ trilhas.clear(); return; }
+
+    const overrideAsClient = isLtClientOverrideGroup(grpId) && INVALIDATOR_PHONES.has(senderPhone);
+    const fromTeam = !overrideAsClient && isTeamPhone(senderPhone);
+    const citada = citacaoPorId(row, msgByIdByGroup[grpId]);
+    const replyText = gf(row,'reply').trim();
+    const citadaTexto = !citada && replyText && msgIndexByGroup[grpId]
+      ? (msgIndexByGroup[grpId].get(replyText) || [])[0] : null;
+    const alvoCitado = citada || citadaTexto;
+
+    if(!fromTeam){
+      // ── mensagem de CLIENTE: abre trilha ──
+      // Mesmos guards do motor antigo: reagir, mandar figurinha, clicar botão ou
+      // responder o robô não são pedido de atendimento.
+      if(typeRaw === 'Botão') return;
+      if(typeRaw === 'Reação' || typeRaw === 'Figurinha') return;
+      if(soEmoji(msgText)) return;
+      if(alvoCitado && alvoCitado.phone === AUTOMATION_NUMBER) return;
+
+      const marcados = telefonesMarcados(msgText);
+      let dono = marcados[0] || '';
+      if(!dono && alvoCitado && isTeamPhone(alvoCitado.phone)) dono = alvoCitado.phone;
+
+      if(!trilhas.has(dono)){
+        trilhas.set(dono, { desde: dt, phone: senderPhone, nome: senderNome, repassadaPor: new Set() });
+      }
+      return;
+    }
+
+    // ── mensagem do TIME ──
+    // Fecha o que pode fechar; se marcou alguém do time, repassa em vez de fechar.
+    const marcados = telefonesMarcados(msgText).filter(p => p !== senderPhone);
+    const podeFechar = (dono, tr) => !tr.repassadaPor.has(senderPhone);
+
+    [...trilhas.entries()].forEach(([dono, tr]) => {
+      if(!podeFechar(dono, tr)) return;
+
+      if(marcados.length){
+        // repasse: muda de dono, cronômetro segue correndo
+        const novoDono = marcados[0];
+        tr.repassadaPor.add(senderPhone);
+        trilhas.delete(dono);
+        // se o marcado já espera algo neste grupo, vale a espera mais antiga
+        const jaAberta = trilhas.get(novoDono);
+        if(!jaAberta || tr.desde < jaAberta.desde) trilhas.set(novoDono, tr);
+        return;
+      }
+
+      trilhas.delete(dono);
+      if(tr.desde < TRILHA_NOVA_DESDE) return;      // trilha velha é do motor antigo
+      guardaCaso({
+        grpId, pendente_desde: tr.desde, pendente_phone: tr.phone, pendente_nome: tr.nome,
+        respondido_em: dt, respondente_phone: senderPhone, respondente_nome: senderNome,
+        tipo: setorDoTelefone(senderPhone) || 'GESTOR',
+        gestor_nome: meta.gestor || '', leadMins: bizMins(tr.desde, dt), aberto: false,
+      });
+    });
+  });
+
+  // Trilhas que ficaram abertas
+  Object.keys(trilhasPorGrupo).forEach(grpId => {
     const g = grpMap[grpId]; if(!g) return;
-    // Mesmos cortes do bloco de casos acima: grupo parado há mais de ABANDONO_DIAS
-    // não é "aguardando resposta", é grupo morto. E cliente que já saiu (FECHADO no
-    // nome) não fica na fila do time — se ninguém falou depois do rename, o pendente
-    // antigo nunca era zerado pela máquina de estado e ficava aberto para sempre.
+    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
+    trilhasPorGrupo[grpId].forEach((tr, dono) => {
+      if(tr.desde < TRILHA_NOVA_DESDE) return;
+      guardaCaso({
+        grpId, pendente_desde: tr.desde, pendente_phone: tr.phone, pendente_nome: tr.nome,
+        respondido_em: null, respondente_phone: null, respondente_nome: null,
+        tipo: (dono && setorDoTelefone(dono)) || 'GESTOR',
+        gestor_nome: g.gestor || '', leadMins: bizMins(tr.desde, agora), aberto: true,
+      });
+    });
+  });
+
+  // Troca: cada trilha é contada pelo modelo vigente no dia em que ABRIU.
+  const trocaEra = (arr, novos) => {
+    const antigos = arr.filter(c => c.pendente_desde < TRILHA_NOVA_DESDE);
+    arr.splice(0, arr.length, ...antigos, ...novos);
+  };
+  trocaEra(ltCases,           novoCases.GESTOR);
+  trocaEra(ltCasesEdicao,     novoCases.EDICAO);
+  trocaEra(ltCasesWebdesign,  novoCases.WEBDESIGN);
+  trocaEra(ltCasesEstrategia, novoCases.ESTRATEGIA);
+
+  // g.leadTimes alimenta a média por grupo e foi montada pelo motor antigo, que só
+  // contava a trilha do gestor. Refaz: antes do corte, mantém só GESTOR (não mexe no
+  // que já foi apresentado); do corte em diante conta qualquer setor, porque agora
+  // quem responde é quem atende.
+  Object.values(grpMap).forEach(g => { g.leadTimes = []; });
+  [ltCases, ltCasesEdicao, ltCasesWebdesign, ltCasesEstrategia].forEach(arr => {
+    arr.forEach(c => {
+      const g = grpMap[c.grpId]; if(!g) return;
+      if(!(c.leadMins >= 0)) return;
+      if(c.pendente_desde < TRILHA_NOVA_DESDE && c.tipo !== 'GESTOR') return;
+      g.leadTimes.push(c.leadMins);
+    });
+  });
+
+  // Store open tickets per gestor for the chart (gestor track only)
+  // Sai de ltCases já com as duas eras trocadas, e não mais do estado do motor
+  // antigo: senão o gráfico continuaria mostrando como pendente a trilha que o
+  // motor novo já fechou.
+  //
+  // Mesmos cortes de sempre: grupo parado há mais de ABANDONO_DIAS não é
+  // "aguardando resposta", é grupo morto; e cliente que já saiu (FECHADO no nome)
+  // não fica na fila do time.
+  const openByGestor = {};
+  ltCases.filter(c => c.aberto).forEach(c => {
+    const g = grpMap[c.grpId]; if(!g) return;
     if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
     const gestorName = g.gestor || '—';
     if(!openByGestor[gestorName]) openByGestor[gestorName] = [];
     openByGestor[gestorName].push({
-      grpId, grpName: g.name || grpId,
-      pendente_desde: st.gestor.desde,
-      pendente_nome: st.gestor.nome,
-      leadMins: bizMins(st.gestor.desde, new Date())
+      grpId: c.grpId, grpName: g.name || c.grpId,
+      pendente_desde: c.pendente_desde,
+      pendente_nome: c.pendente_nome,
+      leadMins: bizMins(c.pendente_desde, new Date())
     });
   });
   window._openByGestor = openByGestor;
