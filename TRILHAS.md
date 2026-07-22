@@ -21,21 +21,29 @@ Para quem? O que a mensagem apontar:
 Se essa pessoa já tem uma trilha aberta nesse grupo, não abre outra — o cronômetro
 que vale é o da primeira mensagem sem resposta.
 
-**2. Quem responde fecha a trilha.**
+**2. Quem responde fecha a trilha — qualquer um do time.**
 
-- Trilha **sem dono**: o primeiro do time que falar fecha. Gestor, estratégia,
-  edição, webdesign — qualquer um.
-- Trilha **com dono**: só o dono fecha. Outro membro falando no grupo não fecha a
-  trilha alheia (nem a mantém refém: ele pode falar à vontade).
+Não importa o dono. Se o cliente escreveu para o design e o gestor respondeu,
+está atendido: fecha, e o tempo conta para o gestor. Ter dono não prende a trilha
+a ninguém; dono é só de quem se espera a resposta enquanto ela está aberta.
 
 **3. Marcar alguém é repassar, não atender.**
 
-Mensagem de membro do time que marca outro membro com `@` **não fecha** trilha
-nenhuma. Ela transfere: a trilha aberta passa a ser do marcado, e o cronômetro
-continua correndo até o marcado responder.
+A única forma de responder **sem** fechar é marcar outro membro com `@`. Aí a
+mensagem vira repasse: a trilha passa a ser do marcado e o cronômetro continua
+correndo até ele responder.
 
-É o que destrava o caso do dia a dia: "essa mensagem era pro design" — marco o
-design, confirmo que a trilha é dele, e sigo falando no grupo sem assumir nada.
+É a válvula da regra 2: se era algo que só o design podia resolver, o gestor
+marca o design, confirma que a trilha é dele, e segue falando no grupo sem
+assumir nada.
+
+**3b. Quem repassou não fecha o que acabou de repassar.**
+
+Depois de marcar o design, o gestor pode escrever à vontade — nenhuma mensagem
+dele fecha aquela trilha. Fechar, só o design ou outra pessoa. Sem isso a regra 2
+desfaria o repasse na mensagem seguinte.
+
+Marcar o **cliente** não é repasse: só conta `@` que aponta para alguém do time.
 
 **4. Depois do repasse, conversa nova abre trilha nova.**
 
@@ -47,6 +55,12 @@ esperando o seu dono.
 
 Fechou a trilha, o tempo entra no painel de quem fechou — não no do gestor do
 grupo. Cada um vê o próprio tempo de resposta.
+
+## De quando vale
+
+A regra nova vale para trilha **aberta a partir de 22/07/2026**. Trilha aberta
+antes disso continua calculada pelo modelo antigo, para não mudar número que já
+foi apresentado. Na prática o motor roda os dois e escolhe pela data de abertura.
 
 ## O que não conta
 
@@ -65,9 +79,10 @@ Regras que já existem hoje e continuam valendo:
 (estratégia) responde 15:24 → fecha, 50 min, no painel do Paulo.
 *Hoje:* fica em aberto para sempre, porque só gestor fecha trilha de gestor.
 
-**Sinergia** — Camila manda imagem 19:35 citando o Diogo → trilha do Diogo. Só o
-Diogo fecha. Segue em aberto de verdade.
-*Hoje:* igual — este é um ticket legítimo.
+**Sinergia** — Camila manda imagem 19:35 citando o Diogo → trilha do Diogo. O
+designer responde 19:51 → fecha, 16 min, no painel do designer. Se fosse coisa que
+só o Diogo resolve, o designer teria marcado o Diogo em vez de responder.
+*Hoje:* fica em aberto para sempre, esperando o Diogo.
 
 **Jucilaine** — cliente escreve 09:19 sem marcar ninguém → trilha sem dono. Editor
 responde 09:20 → fecha, 1 min.
