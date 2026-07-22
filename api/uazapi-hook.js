@@ -1,8 +1,12 @@
-// POST /api/uazapi-hook?s=<segredo>&i=<1|2|3> -> grava a mensagem em "Controle de Mensagens"
+// POST /api/uazapi-hook?s=<segredo>&i=<1|2> -> grava a mensagem em "Controle de Mensagens"
 //
-// Substitui o n8n. As três instâncias apontam para cá; a mesma mensagem chega 2 ou 3
-// vezes e o índice único (Grupo, message_id) descarta as repetições — por isso cair
-// uma instância não abre buraco: as outras já entregaram.
+// Substitui o n8n. Duas instâncias apontam para cá — inst1 e inst2 — e a mesma
+// mensagem chega duas vezes; o índice único (Grupo, message_id) descarta a
+// repetição. É por isso que cair uma instância não abre buraco: a outra entregou.
+//
+// A inst3 saiu em 22/07. Ficava com 12 grupos que as outras duas não têm, todos
+// internos e já ignorados por não estarem na planilha — cobertura de cliente
+// idêntica com duas.
 //
 // Faz o que o n8n fazia, menos transcrever áudio e descrever imagem (combinado: nenhum
 // número do dashboard depende desse texto).
@@ -61,7 +65,7 @@ export default async function handler(req, res) {
   if (!payload || typeof payload !== "object") payload = { _vazio: true };
 
   // A UAZAPI manda o token da própria instância dentro de cada webhook. Guardar isso
-  // seria deixar a credencial das três parada no banco, em texto puro, a cada mensagem.
+  // seria deixar a credencial da instância parada no banco, em texto puro, a cada mensagem.
   if ("token" in payload) delete payload.token;
 
   const dataUrl = process.env.SUPABASE_DATA_URL;

@@ -1,8 +1,11 @@
 # Trocar o n8n pela ingestão direta da UAZAPI
 
-**Corte feito em 21/07/2026 às 15:43.** As três instâncias apontam para o endpoint;
-o n8n não recebe mais nada e fica parado, como backup, por uma semana. O dashboard
-não depende mais dele.
+**Corte feito em 21/07/2026 às 15:43.** O n8n não recebe mais nada e fica parado,
+como backup, por uma semana — o dashboard não depende mais dele.
+
+**Desde 22/07 a ingestão é de duas instâncias: inst1 e inst2.** A inst3 saiu do
+nosso sistema (webhook desligado); a instância em si continua existindo e
+conectada na UAZAPI, intocada — quem envia mensagem por ela não foi afetado.
 
 ## Por que estamos fazendo isso
 
@@ -236,9 +239,17 @@ Não houve estrago: nas 331 linhas do dia não há nenhuma assinatura do n8n
 duplicata, e os grupos que só a inst3 via já eram ignorados. O n8n recebeu e não
 escreveu.
 
-**Risco que fica:** se o workflow do n8n continuar ligado no Railway, ele pode
-repontar a inst1 ou a inst2 do mesmo jeito — e aí a ingestão para de verdade.
-Desligar o workflow no Railway deixou de ser faxina e virou prevenção.
+**Confirmado às 16:00 do mesmo dia:** o webhook da inst3 foi desligado por nós às
+~13:50 e estava **ligado de novo** duas horas depois, apontando para o Railway.
+Ninguém encostou nele. Não é teoria: o workflow do n8n reconfigura o webhook da
+instância sozinho, e desligar pelo nosso lado não gruda.
+
+**Risco que fica:** o mesmo mecanismo pode repontar a inst1 ou a inst2 — e aí a
+ingestão para de verdade, calada. Desligar o workflow no Railway deixou de ser
+faxina e virou a única correção durável; do nosso lado não há como impedir.
+
+O que dá para fazer daqui é vigiar: conferir de hora em hora se inst1 e inst2
+continuam apontadas para o endpoint, e avisar no minuto em que saírem.
 
 ## Pendências que não são de código
 
@@ -249,7 +260,7 @@ Desligar o workflow no Railway deixou de ser faxina e virou prevenção.
   `openai_apikey` em texto puro para quem tiver o token da instância.
 - **Rotacionar a `sb_secret_`** do projeto de dados.
 - **Trocar o `UAZAPI_HOOK_SECRET`** (foi exposto em conversa).
-- **Rotacionar os tokens das três instâncias** depois que o corte estabilizar —
+- **Rotacionar os tokens das instâncias** depois que o corte estabilizar —
   também circularam em conversa. Atenção: outros sistemas usam esses tokens para
   **enviar** mensagem (n8n, edge functions do f3f-auto-ads via
   `UAZAPI_INSTANCE_TOKEN`); rotacionar exige atualizar lá também.

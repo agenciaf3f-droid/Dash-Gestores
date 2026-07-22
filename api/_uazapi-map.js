@@ -58,7 +58,7 @@ export function linhaDoWebhook(payload, gestorStatus) {
   if (!m) return { erro: "payload sem message" };
 
   // messageid, NÃO id: o id vem prefixado com o número da instância
-  // (5511986358506:3EB06D…), então difere entre as três para a MESMA mensagem e
+  // (5511986358506:3EB06D…), então difere entre as instâncias para a MESMA mensagem e
   // nunca deduplicaria. messageid é idêntico — confirmado com captura real.
   const messageId = String(m.messageid || "").trim();
   if (!messageId) return { erro: "sem messageid" };
