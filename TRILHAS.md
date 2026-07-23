@@ -60,6 +60,19 @@ esperando o seu dono.
 Fechou a trilha, o tempo entra no painel de quem fechou — não no do gestor do
 grupo. Cada um vê o próprio tempo de resposta.
 
+**6. Cliente marca dois → abre para os dois.**
+
+Quando o cliente marca dois (ou mais) membros na mesma mensagem, a trilha abre
+para todos ao mesmo tempo. Fecha quando **qualquer um do time** responde, e o
+tempo conta no painel de **cada um dos marcados**. Se ninguém responde, ficam
+pendentes, um por pessoa.
+
+Na média do grupo o atendimento conta uma vez só — são vários créditos de pessoa,
+não vários atendimentos. Vale só para a marcação múltipla do cliente: marcar um e
+outro responder continua contando para quem respondeu (regra 5). O crédito de
+gestor segue pelo gestor do grupo; o de edição, webdesign e estratégia vai para a
+pessoa marcada.
+
 ## De quando vale
 
 A regra nova vale para trilha **aberta a partir de 22/07/2026**. Trilha aberta

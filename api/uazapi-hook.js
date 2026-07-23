@@ -56,7 +56,14 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: "not found" });   // 404, não 401: não confirma que a rota existe
   }
 
+  // Só inst1 e inst2 fazem parte da ingestão. Se a inst3 (ou qualquer outra) for
+  // repontada para cá — o workflow do n8n reconfigura o webhook da instância
+  // sozinho — nada dela entra: nem na tabela, nem em uazapi_raw. Para o sistema é
+  // como se a inst3 nunca tivesse existido. Responde 200 para não gerar retry.
   const instancia = url.searchParams.get("i") || "?";
+  if (instancia !== "1" && instancia !== "2") {
+    return res.status(200).json({ ok: true, ignorado: `instância ${instancia} fora da ingestão` });
+  }
 
   let payload = req.body;
   if (typeof payload === "string") {

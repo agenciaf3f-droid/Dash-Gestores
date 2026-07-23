@@ -2292,11 +2292,51 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   const TRILHA_NOVA_DESDE = new Date(2026, 6, 22, 0, 0, 0);   // 22/07/2026
 
   const novoCases = { GESTOR: [], EDICAO: [], WEBDESIGN: [], ESTRATEGIA: [] };
-  const trilhasPorGrupo = {};   // grpId → Map<donoTelefone|'', trilha>
+  const trilhasPorGrupo = {};   // grpId → [trilha, ...]
 
   const guardaCaso = (caso) => {
     const alvo = novoCases[caso.tipo] || novoCases.GESTOR;
     alvo.push(caso);
+  };
+
+  // chave de um conjunto de donos, para não abrir duas trilhas iguais na sequência.
+  const chaveDonos = (donos) => donos.slice().sort().join(',');
+
+  // Emite os casos de uma trilha (fechada ou aberta).
+  //
+  // Multi-menção: o cliente marcou 2+ membros. Abre para todos, fecha quando
+  // qualquer um do time responde, e o tempo conta no painel de CADA marcado — um
+  // caso por dono, creditado ao dono. `atendimentoId` amarra esses casos irmãos
+  // para a média do grupo contar o atendimento uma vez só, não uma por marcado.
+  //
+  // Single e sem-dono seguem como sempre: um caso só, creditado a quem respondeu
+  // (fechada) ou ao dono/gestor (aberta). Marcar 1 e outro responder continua indo
+  // para quem respondeu — só a marcação dupla muda esse crédito.
+  const emitir = (tr, fecha, grpId, meta, g) => {
+    if(tr.desde < TRILHA_NOVA_DESDE) return;     // trilha velha é do motor antigo
+    const multi   = tr.donos.length >= 2;
+    const leadMins = bizMins(tr.desde, fecha ? fecha.dt : agora);
+    const atendimentoId = grpId + '|' + (+tr.desde);
+    const base = {
+      grpId, pendente_desde: tr.desde, pendente_phone: tr.phone, pendente_nome: tr.nome,
+      respondido_em: fecha ? fecha.dt : null,
+      respondente_phone: fecha ? fecha.phone : null,
+      respondente_nome:  fecha ? fecha.nome  : null,
+      gestor_nome: (meta && meta.gestor) || (g && g.gestor) || '', leadMins, aberto: !fecha,
+    };
+    // Quem recebe o tempo no painel por pessoa: multi credita cada dono; o resto
+    // credita quem respondeu (fechada) e nada (aberta, já descartada do gráfico).
+    const alvos = multi ? tr.donos : [null];
+    alvos.forEach(dono => {
+      const creditar = multi ? dono : (fecha ? fecha.phone : null);
+      guardaCaso({
+        ...base,
+        creditar_phone: creditar,
+        atendimentoId: multi ? atendimentoId : null,
+        tipo: (creditar && setorDoTelefone(creditar))
+              || (dono && setorDoTelefone(dono)) || 'GESTOR',
+      });
+    });
   };
 
   sortedRows.forEach(row => {
@@ -2305,8 +2345,8 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     if(isExcludedGestor(meta.gestor)) return;
     const dt = parseDateTime(row); if(!dt) return;
 
-    if(!trilhasPorGrupo[grpId]) trilhasPorGrupo[grpId] = new Map();
-    const trilhas = trilhasPorGrupo[grpId];
+    if(!trilhasPorGrupo[grpId]) trilhasPorGrupo[grpId] = [];
+    let trilhas = trilhasPorGrupo[grpId];
 
     const senderPhone = normalizePhone(gf(row,'phone'));
     const senderNome  = gf(row,'sender').trim();
@@ -2314,7 +2354,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     const typeRaw     = gf(row,'type').trim();
 
     if(senderPhone === AUTOMATION_NUMBER) return;
-    if(isGrupoFechado(gf(row,'groupName'))){ trilhas.clear(); return; }
+    if(isGrupoFechado(gf(row,'groupName'))){ trilhasPorGrupo[grpId] = []; return; }
 
     const overrideAsClient = isLtClientOverrideGroup(grpId) && INVALIDATOR_PHONES.has(senderPhone);
     const fromTeam = !overrideAsClient && isTeamPhone(senderPhone);
@@ -2333,12 +2373,14 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       if(soEmoji(msgText)) return;
       if(alvoCitado && alvoCitado.phone === AUTOMATION_NUMBER) return;
 
-      const marcados = telefonesMarcados(msgText);
-      let dono = marcados[0] || '';
-      if(!dono && alvoCitado && isTeamPhone(alvoCitado.phone)) dono = alvoCitado.phone;
+      // Todos os membros marcados são donos. Sem marcação, cai na citação; sem as
+      // duas, trilha sem dono.
+      let donos = telefonesMarcados(msgText);
+      if(!donos.length && alvoCitado && isTeamPhone(alvoCitado.phone)) donos = [alvoCitado.phone];
 
-      if(!trilhas.has(dono)){
-        trilhas.set(dono, { desde: dt, phone: senderPhone, nome: senderNome, repassadaPor: new Set() });
+      const chave = chaveDonos(donos);
+      if(!trilhas.some(tr => chaveDonos(tr.donos) === chave)){
+        trilhas.push({ desde: dt, phone: senderPhone, nome: senderNome, donos, repassadaPor: new Set() });
       }
       return;
     }
@@ -2346,46 +2388,26 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     // ── mensagem do TIME ──
     // Fecha o que pode fechar; se marcou alguém do time, repassa em vez de fechar.
     const marcados = telefonesMarcados(msgText).filter(p => p !== senderPhone);
-    const podeFechar = (dono, tr) => !tr.repassadaPor.has(senderPhone);
-
-    [...trilhas.entries()].forEach(([dono, tr]) => {
-      if(!podeFechar(dono, tr)) return;
-
+    const restantes = [];
+    trilhas.forEach(tr => {
+      if(tr.repassadaPor.has(senderPhone)){ restantes.push(tr); return; }  // quem repassou não fecha
       if(marcados.length){
-        // repasse: muda de dono, cronômetro segue correndo
-        const novoDono = marcados[0];
+        // repasse: a trilha passa a ser dos marcados, cronômetro segue correndo
         tr.repassadaPor.add(senderPhone);
-        trilhas.delete(dono);
-        // se o marcado já espera algo neste grupo, vale a espera mais antiga
-        const jaAberta = trilhas.get(novoDono);
-        if(!jaAberta || tr.desde < jaAberta.desde) trilhas.set(novoDono, tr);
+        tr.donos = marcados.slice();
+        restantes.push(tr);
         return;
       }
-
-      trilhas.delete(dono);
-      if(tr.desde < TRILHA_NOVA_DESDE) return;      // trilha velha é do motor antigo
-      guardaCaso({
-        grpId, pendente_desde: tr.desde, pendente_phone: tr.phone, pendente_nome: tr.nome,
-        respondido_em: dt, respondente_phone: senderPhone, respondente_nome: senderNome,
-        tipo: setorDoTelefone(senderPhone) || 'GESTOR',
-        gestor_nome: meta.gestor || '', leadMins: bizMins(tr.desde, dt), aberto: false,
-      });
+      emitir(tr, { dt, phone: senderPhone, nome: senderNome }, grpId, meta, grpMap[grpId]);
     });
+    trilhasPorGrupo[grpId] = restantes;
   });
 
   // Trilhas que ficaram abertas
   Object.keys(trilhasPorGrupo).forEach(grpId => {
     const g = grpMap[grpId]; if(!g) return;
     if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
-    trilhasPorGrupo[grpId].forEach((tr, dono) => {
-      if(tr.desde < TRILHA_NOVA_DESDE) return;
-      guardaCaso({
-        grpId, pendente_desde: tr.desde, pendente_phone: tr.phone, pendente_nome: tr.nome,
-        respondido_em: null, respondente_phone: null, respondente_nome: null,
-        tipo: (dono && setorDoTelefone(dono)) || 'GESTOR',
-        gestor_nome: g.gestor || '', leadMins: bizMins(tr.desde, agora), aberto: true,
-      });
-    });
+    trilhasPorGrupo[grpId].forEach(tr => emitir(tr, null, grpId, grpMeta[grpId], g));
   });
 
   // Troca: cada trilha é contada pelo modelo vigente no dia em que ABRIU.
@@ -2403,11 +2425,18 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   // que já foi apresentado); do corte em diante conta qualquer setor, porque agora
   // quem responde é quem atende.
   Object.values(grpMap).forEach(g => { g.leadTimes = []; });
+  const atendVisto = new Set();   // multi-menção vira vários casos do MESMO atendimento
   [ltCases, ltCasesEdicao, ltCasesWebdesign, ltCasesEstrategia].forEach(arr => {
     arr.forEach(c => {
       const g = grpMap[c.grpId]; if(!g) return;
       if(!(c.leadMins >= 0)) return;
       if(c.pendente_desde < TRILHA_NOVA_DESDE && c.tipo !== 'GESTOR') return;
+      // A média do grupo conta o atendimento uma vez, mesmo que o cliente tenha
+      // marcado dois e ele apareça como dois casos (um por marcado).
+      if(c.atendimentoId){
+        if(atendVisto.has(c.atendimentoId)) return;
+        atendVisto.add(c.atendimentoId);
+      }
       g.leadTimes.push(c.leadMins);
     });
   });
@@ -2719,8 +2748,11 @@ function renderCharts(){
       (cases || []).forEach(caso => {
         if(caso.leadMins == null) return;
         // Ancora no telefone (estável, vem do roster), não no nome do WhatsApp —
-        // que a pessoa troca e faz a mesma virar duas barras.
-        const tel = normalizePhone(caso.respondente_phone || '');
+        // que a pessoa troca e faz a mesma virar duas barras. Em caso fechado de
+        // marcação dupla, creditar_phone é o marcado — o tempo entra no painel de
+        // cada um dos dois. Aberto segue como antes (respondente nulo → descartado).
+        const tel = normalizePhone(
+          (caso.aberto ? caso.respondente_phone : (caso.creditar_phone || caso.respondente_phone)) || '');
         const reg = EQUIPE_POR_TELEFONE.get(tel);
         // Sem telefone identificado (casos abertos por citação onde não dá para
         // saber quem respondeu): descarta. Barra "Sem nome" com média absurda só
