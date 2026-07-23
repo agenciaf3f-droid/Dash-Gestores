@@ -79,6 +79,13 @@ A regra nova vale para trilha **aberta a partir de 22/07/2026**. Trilha aberta
 antes disso continua calculada pelo modelo antigo, para não mudar número que já
 foi apresentado. Na prática o motor roda os dois e escolhe pela data de abertura.
 
+Com uma exceção: trilha que ficou **aberta** no modelo antigo é descartada, não
+mostrada como pendente. Eram trilhas de setor que só fechavam por gente do mesmo
+setor — respondidas por outro, ficavam penduradas para sempre, contando
+expediente até agora. Com a virada de modelo isso deixou de fazer sentido, então
+o pendente que só o motor velho enxergava sai da conta. Os atendimentos
+**fechados** de antes do corte continuam intactos.
+
 ## O que não conta
 
 Regras que já existem hoje e continuam valendo:

@@ -2411,8 +2411,16 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   });
 
   // Troca: cada trilha é contada pelo modelo vigente no dia em que ABRIU.
+  //
+  // Dos antigos (motor de setor, pré-corte) ficam só os FECHADOS — esses são
+  // atendimento real, com tempo medido, e o número já foi apresentado. Os que
+  // ficaram ABERTOS no modelo antigo são descartados: eram trilha de setor que só
+  // fechava por gente do mesmo setor, então respondida por outro (o estrategista
+  // respondendo o cliente) ficava pendurada para sempre, contando expediente até
+  // agora. Com a virada de modelo isso deixou de existir; um pendente que só o
+  // motor velho enxergava não é atendimento aberto, é resíduo da regra antiga.
   const trocaEra = (arr, novos) => {
-    const antigos = arr.filter(c => c.pendente_desde < TRILHA_NOVA_DESDE);
+    const antigos = arr.filter(c => c.pendente_desde < TRILHA_NOVA_DESDE && !c.aberto);
     arr.splice(0, arr.length, ...antigos, ...novos);
   };
   trocaEra(ltCases,           novoCases.GESTOR);
