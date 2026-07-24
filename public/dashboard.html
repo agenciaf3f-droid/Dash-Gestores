@@ -2497,33 +2497,28 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   });
   window._openByGestor = openByGestor;
 
-  // Open tickets for edição/webdesign
-  const openByEdicao = [];
-  Object.keys(grpState).forEach(grpId => {
-    const st = grpState[grpId]; if(!st.edicao.desde) return;
-    const g = grpMap[grpId]; if(!g) return;
-    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
-    openByEdicao.push({ grpId, grpName: g.name || grpId, pendente_desde: st.edicao.desde, leadMins: bizMins(st.edicao.desde, new Date()) });
-  });
-  window._openByEdicao = openByEdicao;
-
-  const openByWebdesign = [];
-  Object.keys(grpState).forEach(grpId => {
-    const st = grpState[grpId]; if(!st.webdesign.desde) return;
-    const g = grpMap[grpId]; if(!g) return;
-    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
-    openByWebdesign.push({ grpId, grpName: g.name || grpId, pendente_desde: st.webdesign.desde, leadMins: bizMins(st.webdesign.desde, new Date()) });
-  });
-  window._openByWebdesign = openByWebdesign;
-
-  const openByEstrategia = [];
-  Object.keys(grpState).forEach(grpId => {
-    const st = grpState[grpId]; if(!st.estrategia.desde) return;
-    const g = grpMap[grpId]; if(!g) return;
-    if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
-    openByEstrategia.push({ grpId, grpName: g.name || grpId, pendente_desde: st.estrategia.desde, leadMins: bizMins(st.estrategia.desde, new Date()) });
-  });
-  window._openByEstrategia = openByEstrategia;
+  // Pendentes de edição, webdesign e estratégia — pelos mesmos casos já trocados
+  // de era, e não mais pelo estado do motor antigo (grpState).
+  //
+  // Era daí que vinha trilha aberta que já não devia existir: essas três listas
+  // liam direto a máquina de estado por setor, então passavam por fora do corte de
+  // era, do descarte dos abertos pré-virada e do próprio motor novo — o mesmo
+  // cliente aparecia várias vezes esperando, e trilha que o motor novo já tinha
+  // fechado seguia na fila.
+  const abertosDe = (arr) => {
+    const out = [];
+    arr.filter(c => c.aberto).forEach(c => {
+      const g = grpMap[c.grpId]; if(!g) return;
+      if(grupoAbandonado(g) || isGrupoFechado(g.name)) return;
+      out.push({ grpId: c.grpId, grpName: g.name || c.grpId,
+                 pendente_desde: c.pendente_desde,
+                 leadMins: bizMins(c.pendente_desde, new Date()) });
+    });
+    return out;
+  };
+  window._openByEdicao     = abertosDe(ltCasesEdicao);
+  window._openByWebdesign  = abertosDe(ltCasesWebdesign);
+  window._openByEstrategia = abertosDe(ltCasesEstrategia);
 
 
   /* NOTE: lastReport, reportDays, prevAudioMins already set from
