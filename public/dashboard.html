@@ -2009,7 +2009,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
         prevAudioMins: meta.prevAudioMins,
         lastVideoReport: meta.lastVideoReport,
         videoReportDays: meta.videoReportDays,
-        msgs: [], gestorMsgs: [],
+        msgs: [], gestorMsgs: [], teamMsgs: [],
         lastMsgDt: null,
         leadTimes: [],
       };
@@ -2040,6 +2040,14 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
 
     if(fromGestor){
       g.gestorMsgs.push({ dt, text: msgText, type: typeRaw, gestor: meta.gestor });
+    }
+    // Guarda quem MANDOU, para "Respostas da equipe" contar por pessoa. Antes ela
+    // lia gestorMsgs e rotulava pelo gestor do grupo, então mensagem do Diogo num
+    // grupo do Guilherme virava resposta do Guilherme. E quem não é gestor de
+    // tráfego — estratégia, edição, webdesign — nem aparecia, embora responda
+    // cliente todo dia.
+    if(fromTeam){
+      g.teamMsgs.push({ dt, type: typeRaw, phone: senderPhone });
     }
 
     // Cliente fechado: não abre nem fecha trilha. Os dois guards ficam aqui, e não
@@ -2993,9 +3001,17 @@ function renderCharts(){
     : [...allGestors];
   gestorsForTypeChart.forEach(name => { typeMap[name] = { audio:0, texto:0, imagem:0 }; });
 
+  // Conta por QUEM MANDOU, não pelo gestor do grupo. Antes o nome vinha de
+  // g.gestor, então mensagem do Diogo num grupo do Guilherme era contada como
+  // resposta do Guilherme — e quem não é gestor de tráfego (estratégia, edição,
+  // webdesign) não aparecia, embora responda cliente todo dia.
   groupData.forEach(g => {
-    g.gestorMsgs.forEach(m => {
-      const name = g.gestor || '—';
+    (g.teamMsgs || []).forEach(m => {
+      const reg = EQUIPE_POR_TELEFONE.get(normalizePhone(m.phone || ''));
+      const name = reg ? reg.nome : null;
+      if(!name) return;                                  // sem nome no roster: não inventa dono
+      if(isExcludedGestor(name)) return;                 // mesma lista de sempre fora do painel
+      if(activeGF && name !== activeGF) return;          // respeita o filtro de gestor
       if(!typeMap[name]) typeMap[name] = { audio:0, texto:0, imagem:0 };
       const t = (m.type || '').trim();
       if(TYPE_REACAO.test(t))      return;              // reagir não é responder
