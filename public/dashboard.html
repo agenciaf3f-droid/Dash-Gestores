@@ -1825,6 +1825,13 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     if(gestorColH) { grpMeta[grpId].gestor = gestorColH; allGestorNames.add(gestorColH); }
     if(statusRaw)  { grpMeta[grpId].status = statusRaw; }
 
+    // Última mensagem do grupo na base inteira — a cobrança de relatório precisa
+    // saber se o grupo ainda está vivo mesmo quando ninguém falou no período filtrado.
+    const dtQualquer = parseDateTime(row);
+    if(dtQualquer && (!grpMeta[grpId].ultimaMsg || dtQualquer > grpMeta[grpId].ultimaMsg)){
+      grpMeta[grpId].ultimaMsg = dtQualquer;
+    }
+
     // Video report detection
     const msgTextAll = gf(row,'msg').trim();
     if(msgTextAll.includes('Segue o seu relatório em vídeo referente')){
@@ -2594,7 +2601,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   window._activeStatusFilter = statusFilter;
 
   // ── Apply filters ──
-  groupData = Object.values(grpMap).filter(g => {
+  const passaFiltros = (g) => {
     if(planFilter   && g.plan   !== planFilter)   return false;
     if(gestorFilter && g.gestor !== gestorFilter)  return false;
     if(statusFilter){
@@ -2603,6 +2610,30 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       if(statusFilter === 'inativo' && st !== 'inativo') return false;
     }
     return true;
+  };
+  groupData = Object.values(grpMap).filter(passaFiltros);
+
+  // Universo de grupos para a cobrança de relatório: sai do grpMeta, que é montado
+  // com a base inteira, e não do groupData, que só tem quem falou no período.
+  //
+  // Relatório é obrigação nossa e não depende de o cliente escrever. Cliente calado
+  // sumia da lista de "precisa enviar" justamente na semana em que ninguém falou com
+  // ele — o sistema deixava de cobrar exatamente quem estava mais esquecido. São 14
+  // grupos ativos hoje, calados de 9 a 38 dias e sem relatório na semana.
+  //
+  // Os dois cortes de sempre continuam: cliente que saiu (FECHADO no nome) e grupo
+  // parado há mais de ABANDONO_DIAS não são cobrados — juntos, os 46 casos que
+  // apareceriam indevidamente se o universo entrasse cru.
+  const agoraUniverso = new Date();
+  window._universoGrupos = Object.entries(grpMeta).map(([id, m]) => ({
+    id, name: m.name || id, plan: m.plan || '', gestor: m.gestor || '', status: m.status || '',
+    lastReport: m.lastReportCmd || null, reportDates: m.reportDates || [], reportDays: m.reportDays,
+    ultimaMsg: m.ultimaMsg || null,
+  })).filter(g => {
+    if(isExcludedGestor(g.gestor)) return false;
+    if(isGrupoFechado(g.name)) return false;
+    if(!g.ultimaMsg || (agoraUniverso - g.ultimaMsg) / 86400000 > ABANDONO_DIAS) return false;
+    return passaFiltros(g);
   });
 
   renderAll();
@@ -2918,7 +2949,8 @@ function renderCharts(){
   const relIni = new Date(relFim.getFullYear(), relFim.getMonth() - 2, relFim.getDate());
   _drillWks = {};
   const weeks = {};
-  groupData.forEach(g => {
+  // Todo grupo ativo precisa de relatório na semana, tenha o cliente falado ou não.
+  (window._universoGrupos || groupData).forEach(g => {
     if(!/ativo/i.test(g.status)) return;
     let d = new Date(weekMonday(relIni));
     while(d <= relFim){
