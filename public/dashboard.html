@@ -2291,6 +2291,13 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   */
   const TRILHA_NOVA_DESDE = new Date(2026, 6, 22, 0, 0, 0);   // 22/07/2026
 
+  // Pendência só é cobrada a partir da última virada de regra. O que ficou aberto
+  // sob a regra anterior é resíduo: mudou quem devia a resposta, então o passivo
+  // velho não vai para a conta de ninguém — some da lista em vez de envelhecer.
+  // Atendimento FECHADO de antes disso continua valendo, com o tempo que teve.
+  // Data da virada "a trilha é do grupo, quem responde pega".
+  const PENDENTE_SO_DESDE = new Date(2026, 6, 24, 0, 0, 0);   // 24/07/2026
+
   const novoCases = { GESTOR: [], EDICAO: [], WEBDESIGN: [], ESTRATEGIA: [] };
   const trilhasPorGrupo = {};   // grpId → [trilha, ...]
 
@@ -2312,6 +2319,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   // atendimento uma vez só.
   const emitir = (tr, fecha, grpId, meta, g) => {
     if(tr.desde < TRILHA_NOVA_DESDE) return;     // trilha velha é do motor antigo
+    if(!fecha && tr.desde < PENDENTE_SO_DESDE) return;   // pendente de antes da virada
     const chamados = tr.donos || tr.chamados || [];
     const multi    = !!fecha && chamados.length >= 2;
     const leadMins = bizMins(tr.desde, fecha ? fecha.dt : agora);
