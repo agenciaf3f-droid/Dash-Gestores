@@ -854,8 +854,8 @@ authClient.auth.onAuthStateChange((_event, session) => {
   <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px;">
     <div class="chart-card">
       <div class="chart-header">
-        <div class="chart-title">⏳ Conversas em Aberto da equipe</div>
-        <div class="chart-sub">Aguardando resposta do time · passe o mouse na linha para ver os clientes</div>
+        <div class="chart-title">⏳ Grupos em Aberto</div>
+        <div class="chart-sub">Clientes aguardando resposta do time · a conversa é do grupo até alguém responder</div>
       </div>
       <div id="open-tickets-table"></div>
     </div>
@@ -2775,6 +2775,7 @@ function renderCharts(){
     setoresEquipe.forEach(cases => {
       (cases || []).forEach(caso => {
         if(caso.leadMins == null) return;
+        if(caso.aberto) return;   // pendente é do grupo, não é atendimento de ninguém
         // Ancora no telefone (estável, vem do roster), não no nome do WhatsApp —
         // que a pessoa troca e faz a mesma virar duas barras. Em caso fechado de
         // marcação dupla, creditar_phone é o marcado — o tempo entra no painel de
@@ -2800,6 +2801,11 @@ function renderCharts(){
   if(window._ltCases){
     window._ltCases.forEach(caso => {
       if(caso.tipo !== 'GESTOR') return;
+      // Pendente não é atendimento do gestor da conta: enquanto ninguém pega, a
+      // conversa é do grupo. Aparecia na lista dele como se fosse um caso seu — e
+      // no N — mesmo esperando outra pessoa. Pendente tem lugar próprio, a tabela
+      // "Grupos em Aberto".
+      if(caso.aberto) return;
       const g = groupData.find(gd => gd.id === caso.grpId);
       if(!g) return; // filtered out
       const gname = caso.gestor_nome || g?.gestor || '—';
@@ -3071,29 +3077,32 @@ function renderCharts(){
   const openWeb = window._openByWebdesign || [];
   const openEst = window._openByEstrategia || [];
 
-  // Build combined labels
-  const allOpenLabels = [...Object.keys(openByG)];
-  if(openEdic.length) allOpenLabels.push('✏️ Edição');
-  if(openWeb.length) allOpenLabels.push('🎨 Webdesign');
-  if(openEst.length) allOpenLabels.push('📊 Estratégia');
-  const openLabels = allOpenLabels.sort();
-  // Tabela (era gráfico de barras): por pessoa, quantas conversas em aberto e há
-  // quanto tempo em média. Passar o mouse na linha lista os clientes daquela pessoa.
-  // A barra só dava a quantidade; a média e os nomes ficavam escondidos no tooltip.
-  const ticketsDe = (nome) => {
-    if(nome === '✏️ Edição')     return openEdic;
-    if(nome === '🎨 Webdesign')  return openWeb;
-    if(nome === '📊 Estratégia') return openEst;   // faltava antes: Estratégia caía no openByG e vinha vazia
-    return openByG[nome] || [];
+  // Uma linha por GRUPO esperando, não por pessoa: a trilha agora nasce do grupo,
+  // então "quantas o Guilherme tem em aberto" dizia que a espera era dele quando
+  // ninguém pegou ainda. O grupo é o que está de fato aguardando; a coluna "quem
+  // pegou" só aparece quando a conversa foi endereçada — cliente marcou alguém, ou
+  // houve repasse.
+  const porGrupo = {};
+  const junta = (lista) => (lista || []).forEach(t => {
+    const k = t.grpId;
+    if(!porGrupo[k]) porGrupo[k] = { grpId:k, grpName:t.grpName, esperas:[], desde:null };
+    porGrupo[k].esperas.push(t);
+    if(!porGrupo[k].desde || t.pendente_desde < porGrupo[k].desde) porGrupo[k].desde = t.pendente_desde;
+  });
+  Object.values(openByG).forEach(junta);
+  junta(openEdic); junta(openWeb); junta(openEst);
+
+  const nomeCurto = (n) => String(n||'').replace(/^\(?\s*FECHADO\s*\)?\s*/i,'').replace(/^F3F\s*-\s*/,'');
+  const donoDoGrupo = (grpId) => {
+    const g = groupData.find(x => x.id === grpId);
+    return g ? (g.gestor || '') : '';
   };
 
-  const linhas = openLabels.filter(nomeValido).map(nome => {
-    const ts = ticketsDe(nome);
-    const media = ts.length ? Math.round(ts.reduce((a,t)=>a+t.leadMins,0)/ts.length) : 0;
-    // mais antigo primeiro: é o que mais precisa de atenção
-    const ordenados = [...ts].sort((a,b)=>b.leadMins-a.leadMins);
-    return { nome, qtd: ts.length, media, ordenados };
-  }).filter(l => l.qtd > 0).sort((a,b) => b.qtd - a.qtd || b.media - a.media);
+  // mais tempo esperando primeiro: é o que precisa de atenção
+  const linhas = Object.values(porGrupo).map(g => {
+    const maior = Math.max(...g.esperas.map(t => t.leadMins));
+    return { ...g, qtd:g.esperas.length, maior, conta: donoDoGrupo(g.grpId) };
+  }).sort((a,b) => b.maior - a.maior);
 
   const alvo = document.getElementById('open-tickets-table');
   if(alvo){
@@ -3104,24 +3113,19 @@ function renderCharts(){
         <div style="overflow-x:auto;">
         <table class="open-table">
           <thead><tr>
-            <th>Pessoa</th>
-            <th class="num">Em aberto</th>
-            <th class="num">Tempo médio</th>
+            <th>Grupo</th>
+            <th>Conta</th>
+            <th class="num">Esperando desde</th>
+            <th class="num">Há quanto tempo</th>
           </tr></thead>
           <tbody>
             ${linhas.map(l => `
               <tr>
-                <td class="open-pessoa">${esc(l.nome)}
-                  <div class="open-pop">
-                    <b>${l.qtd} cliente${l.qtd!==1?'s':''} aguardando</b>
-                    ${l.ordenados.slice(0,12).map(t =>
-                      `<div><span>${esc(String(t.grpName).replace(/^\(?\s*FECHADO\s*\)?\s*/i,'').replace(/^F3F\s*-\s*/,'').substring(0,42))}</span><span class="t">${fmtMins(t.leadMins)}</span></div>`
-                    ).join('')}
-                    ${l.ordenados.length>12 ? `<div style="opacity:.65;">… e mais ${l.ordenados.length-12}</div>` : ''}
-                  </div>
-                </td>
-                <td class="num"><span class="open-qtd">${l.qtd}</span></td>
-                <td class="num">${fmtMins(l.media)}</td>
+                <td class="open-pessoa">${esc(nomeCurto(l.grpName).substring(0,46))}${
+                  l.qtd > 1 ? ` <span class="badge badge-amber" style="font-size:.55rem;">${l.qtd} conversas</span>` : ''}</td>
+                <td style="color:var(--text-2);">${esc(l.conta || '—')}</td>
+                <td class="num" style="white-space:nowrap;">${l.desde ? fmtDT(l.desde) : '—'}</td>
+                <td class="num"><span class="open-qtd">${fmtMins(l.maior)}</span></td>
               </tr>`).join('')}
           </tbody>
         </table>
@@ -3182,7 +3186,14 @@ function openDrillLT(gestorName, casos){
   });
 
   const mediaDe = (a) => a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : 0;
-  const grpList = Object.values(grpAgg).sort((a,b) => mediaDe(b.leadComercial) - mediaDe(a.leadComercial));
+  // Ordem por última interação, mais recente primeiro: a lista serve para
+  // acompanhar o que está acontecendo agora, e ordenar pelo maior lead time
+  // empurrava para o topo grupo que não fala há dias.
+  const grpList = Object.values(grpAgg).sort((a,b) => {
+    const da = a.lastInteraction ? +a.lastInteraction : 0;
+    const db = b.lastInteraction ? +b.lastInteraction : 0;
+    return db - da || mediaDe(b.leadComercial) - mediaDe(a.leadComercial);
+  });
 
   const totalN = casos.filter(c => !c.aberto).length;
   const totalAvg      = mediaDe(grpList.flatMap(g => g.leadComercial));
@@ -3253,13 +3264,14 @@ function openDrillLTGroup(gestorName, grpId){
   const agg = window._drillLTGrpData?.[grpId];
   if(!agg) return;
   const casos = agg.casos;
+  // Pendente no topo (é o que precisa de ação), o resto por data — a interação mais
+  // recente primeiro, para a lista acompanhar o que está acontecendo agora.
   const sorted = [...casos].sort((a,b) => {
-    // Open tickets first, then by lead time descending
     if(a.aberto && !b.aberto) return -1;
     if(!a.aberto && b.aberto) return 1;
-    const la = a.aberto ? a.leadMins : (a.respondido_em && isForaExpediente(a.respondido_em) ? Math.round((a.respondido_em - a.pendente_desde) / 60000) : a.leadMins);
-    const lb = b.aberto ? b.leadMins : (b.respondido_em && isForaExpediente(b.respondido_em) ? Math.round((b.respondido_em - b.pendente_desde) / 60000) : b.leadMins);
-    return lb - la;
+    const da = a.aberto ? +a.pendente_desde : +a.respondido_em;
+    const db = b.aberto ? +b.pendente_desde : +b.respondido_em;
+    return db - da;
   });
   const n = sorted.length;
 
