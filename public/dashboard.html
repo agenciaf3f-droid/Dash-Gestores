@@ -855,7 +855,7 @@ authClient.auth.onAuthStateChange((_event, session) => {
     <div class="chart-card">
       <div class="chart-header">
         <div class="chart-title">⏳ Grupos em Aberto</div>
-        <div class="chart-sub">Clientes aguardando resposta do time · a conversa é do grupo até alguém responder</div>
+        <div class="chart-sub">Clientes aguardando resposta do time · a conversa é do grupo até alguém responder — o gestor da conta é só quem cuida do cliente, o tempo não é debitado dele</div>
       </div>
       <div id="open-tickets-table"></div>
     </div>
@@ -3114,7 +3114,7 @@ function renderCharts(){
         <table class="open-table">
           <thead><tr>
             <th>Grupo</th>
-            <th>Conta</th>
+            <th>Gestor da conta</th>
             <th class="num">Esperando desde</th>
             <th class="num">Há quanto tempo</th>
           </tr></thead>
