@@ -2299,22 +2299,21 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     alvo.push(caso);
   };
 
-  // chave de um conjunto de donos, para não abrir duas trilhas iguais na sequência.
-  const chaveDonos = (donos) => donos.slice().sort().join(',');
-
   // Emite os casos de uma trilha (fechada ou aberta).
   //
-  // Multi-menção: o cliente marcou 2+ membros. Abre para todos, fecha quando
-  // qualquer um do time responde, e o tempo conta no painel de CADA marcado — um
-  // caso por dono, creditado ao dono. `atendimentoId` amarra esses casos irmãos
-  // para a média do grupo contar o atendimento uma vez só, não uma por marcado.
+  // Enquanto ABERTA a trilha é do grupo: não é atendimento de ninguém, então não
+  // credita pessoa nenhuma. Antes, "sem dono" virava tipo GESTOR e o tempo corrido
+  // caía na conta do gestor do grupo — o cliente escrevia para o estrategista sem
+  // marcar e o gestor levava a demora.
   //
-  // Single e sem-dono seguem como sempre: um caso só, creditado a quem respondeu
-  // (fechada) ou ao dono/gestor (aberta). Marcar 1 e outro responder continua indo
-  // para quem respondeu — só a marcação dupla muda esse crédito.
+  // Ao FECHAR, quem respondeu pega para si e leva o tempo. A exceção é a marcação
+  // múltipla: se o cliente chamou 2+ pessoas, cada uma recebe o tempo, um caso por
+  // chamado, e `atendimentoId` amarra os irmãos para a média do grupo contar o
+  // atendimento uma vez só.
   const emitir = (tr, fecha, grpId, meta, g) => {
     if(tr.desde < TRILHA_NOVA_DESDE) return;     // trilha velha é do motor antigo
-    const multi   = tr.donos.length >= 2;
+    const chamados = tr.donos || tr.chamados || [];
+    const multi    = !!fecha && chamados.length >= 2;
     const leadMins = bizMins(tr.desde, fecha ? fecha.dt : agora);
     const atendimentoId = grpId + '|' + (+tr.desde);
     const base = {
@@ -2323,18 +2322,19 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       respondente_phone: fecha ? fecha.phone : null,
       respondente_nome:  fecha ? fecha.nome  : null,
       gestor_nome: (meta && meta.gestor) || (g && g.gestor) || '', leadMins, aberto: !fecha,
+      // de quem se espera a resposta enquanto pendente: null = do grupo
+      dono_phone: fecha ? null : (chamados[0] || null),
     };
-    // Quem recebe o tempo no painel por pessoa: multi credita cada dono; o resto
-    // credita quem respondeu (fechada) e nada (aberta, já descartada do gráfico).
-    const alvos = multi ? tr.donos : [null];
-    alvos.forEach(dono => {
-      const creditar = multi ? dono : (fecha ? fecha.phone : null);
+    const alvos = multi ? chamados : [null];
+    alvos.forEach(quem => {
+      const creditar = multi ? quem : (fecha ? fecha.phone : null);
       guardaCaso({
         ...base,
         creditar_phone: creditar,
         atendimentoId: multi ? atendimentoId : null,
-        tipo: (creditar && setorDoTelefone(creditar))
-              || (dono && setorDoTelefone(dono)) || 'GESTOR',
+        // Aberta vai para ltCases só para aparecer na lista de pendentes; o tipo
+        // aqui não significa "atendimento do gestor" — nada dela entra em média.
+        tipo: (creditar && setorDoTelefone(creditar)) || 'GESTOR',
       });
     });
   };
@@ -2373,14 +2373,26 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
       if(soEmoji(msgText)) return;
       if(alvoCitado && alvoCitado.phone === AUTOMATION_NUMBER) return;
 
-      // Todos os membros marcados são donos. Sem marcação, cai na citação; sem as
-      // duas, trilha sem dono.
-      let donos = telefonesMarcados(msgText);
-      if(!donos.length && alvoCitado && isTeamPhone(alvoCitado.phone)) donos = [alvoCitado.phone];
+      // A trilha é do GRUPO, não de uma pessoa. Marcar alguém diz quem o cliente
+      // chamou — entra em `chamados`, que é quem leva o crédito na marcação
+      // múltipla —, mas não abre trilha separada: a conversa é uma só.
+      //
+      // Cada grupo tem uma trilha CORRENTE. Mensagem seguida do cliente cai nela;
+      // é o que impede o mesmo cliente de aparecer quatro vezes na lista de
+      // pendentes só porque marcou gente diferente ao longo da conversa.
+      let chamados = telefonesMarcados(msgText);
+      if(!chamados.length && alvoCitado && isTeamPhone(alvoCitado.phone)) chamados = [alvoCitado.phone];
 
-      const chave = chaveDonos(donos);
-      if(!trilhas.some(tr => chaveDonos(tr.donos) === chave)){
-        trilhas.push({ desde: dt, phone: senderPhone, nome: senderNome, donos, repassadaPor: new Set() });
+      const corrente = trilhas.find(tr => !tr.repassada);
+      if(corrente){
+        // mesma conversa: acumula quem foi chamado, mantém o relógio da primeira
+        chamados.forEach(p => { if(!corrente.chamados.includes(p)) corrente.chamados.push(p); });
+      } else {
+        // Trilha repassada saiu da corrente: já está endereçada e segue pendente
+        // com o marcado. A mensagem nova do cliente começa outra, do grupo — mesmo
+        // que fosse para a mesma pessoa, essa ainda não foi repassada.
+        trilhas.push({ desde: dt, phone: senderPhone, nome: senderNome,
+                       chamados, repassada: false, repassadaPor: new Set() });
       }
       return;
     }
@@ -2392,9 +2404,11 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     trilhas.forEach(tr => {
       if(tr.repassadaPor.has(senderPhone)){ restantes.push(tr); return; }  // quem repassou não fecha
       if(marcados.length){
-        // repasse: a trilha passa a ser dos marcados, cronômetro segue correndo
+        // Repasse: trava no marcado, o cronômetro segue e a trilha sai da corrente.
+        // Quem repassou não fecha mais esta; as que nascerem depois, sim.
         tr.repassadaPor.add(senderPhone);
         tr.donos = marcados.slice();
+        tr.repassada = true;
         restantes.push(tr);
         return;
       }
@@ -2438,6 +2452,9 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     arr.forEach(c => {
       const g = grpMap[c.grpId]; if(!g) return;
       if(!(c.leadMins >= 0)) return;
+      // Trilha aberta é do grupo, não é atendimento de ninguém: fica fora da média
+      // (que alimenta a barra do gestor via ltMap) até alguém pegar.
+      if(c.aberto) return;
       if(c.pendente_desde < TRILHA_NOVA_DESDE && c.tipo !== 'GESTOR') return;
       // A média do grupo conta o atendimento uma vez, mesmo que o cliente tenha
       // marcado dois e ele apareça como dois casos (um por marcado).
@@ -2939,7 +2956,7 @@ function renderCharts(){
         const drill = _drillWks[wk] || { needed:[], sent:[], label:lbl };
         const missing = drill.needed.filter(g => !drill.sent.some(s => s.id === g.id));
         if(dsIdx === 0) openDrillWeekSent(lbl, drill.sent);
-        else            openDrillWeekNeeded(lbl, missing);
+        else            openDrillWeekNeeded(lbl, missing, drill.sent);
       },
       plugins:{
         legend:{ position:'bottom', labels:{ color:'#9ca3af', font:{size:11,family:"'Inter',sans-serif"}, boxWidth:10, padding:16 } },
@@ -2999,23 +3016,46 @@ function renderCharts(){
     if(!respostas.length){
       alvoResp.innerHTML = '<div class="open-vazio">Nenhuma resposta no período</div>';
     } else {
+      // Uma barra por pessoa mostra a mistura texto/áudio/mídia de relance — a
+      // tabela sozinha obrigava a comparar seis números para ver quem é de áudio.
+      const COR = { texto:'rgba(8,102,255,0.85)', audio:'#15803d', midia:'#b45309' };
+      const celula = (n, pct, cor) => `
+        <td class="num" style="font-variant-numeric:tabular-nums;">${n.toLocaleString('pt-BR')}</td>
+        <td class="num" style="font-variant-numeric:tabular-nums;color:${cor};font-weight:600;">${pct}%</td>`;
+
       alvoResp.innerHTML = `
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 10px 2px;font-size:.68rem;color:var(--text-2);">
+          ${[['Texto',COR.texto],['Áudio',COR.audio],['Mídia',COR.midia]].map(([l,c]) =>
+            `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:${c};display:inline-block;"></span>${l}</span>`).join('')}
+        </div>
         <div style="overflow-x:auto;">
         <table class="open-table">
           <thead><tr>
             <th>Pessoa</th>
+            <th style="min-width:120px;">Mistura</th>
             <th class="num">Texto</th><th class="num">%</th>
             <th class="num">Áudio</th><th class="num">%</th>
             <th class="num">Mídia</th><th class="num">%</th>
+            <th class="num">Total</th>
           </tr></thead>
           <tbody>
-            ${respostas.map(r => `
+            ${respostas.map(r => {
+              const total = r.texto + r.audio + r.midia;
+              const seg = (v, cor) => v ? `<div style="width:${(v*100/total).toFixed(2)}%;background:${cor};" title="${v}"></div>` : '';
+              return `
               <tr>
                 <td class="open-pessoa">${esc(r.nome)}</td>
-                <td class="num">${r.texto.toLocaleString('pt-BR')}</td><td class="num">${r.pTexto}%</td>
-                <td class="num">${r.audio.toLocaleString('pt-BR')}</td><td class="num">${r.pAudio}%</td>
-                <td class="num">${r.midia.toLocaleString('pt-BR')}</td><td class="num">${r.pMidia}%</td>
-              </tr>`).join('')}
+                <td>
+                  <div style="display:flex;height:7px;border-radius:99px;overflow:hidden;background:#f1f5f9;min-width:110px;">
+                    ${seg(r.texto,COR.texto)}${seg(r.audio,COR.audio)}${seg(r.midia,COR.midia)}
+                  </div>
+                </td>
+                ${celula(r.texto, r.pTexto, COR.texto)}
+                ${celula(r.audio, r.pAudio, COR.audio)}
+                ${celula(r.midia, r.pMidia, COR.midia)}
+                <td class="num" style="font-variant-numeric:tabular-nums;font-weight:600;">${total.toLocaleString('pt-BR')}</td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
         </div>`;
@@ -3120,38 +3160,37 @@ function openDrillLT(gestorName, casos){
         plan: gData?.plan || '',
         status: gData?.status || '',
         casos: [],
-        leadValues: [], // mixed: commercial + extra
+        leadComercial: [],   // minutos úteis
+        leadCorrido: [],     // relógio de parede
         lastInteraction: null,
       };
     }
     const agg = grpAgg[gid];
     agg.casos.push(c);
-    // Lead time misto (igual ao KPI geral)
-    if(c.aberto){
-      agg.leadValues.push(c.leadMins);
-    } else if(isForaExpediente(c.respondido_em)){
-      agg.leadValues.push(Math.round((c.respondido_em - c.pendente_desde) / 60000));
-    } else {
-      agg.leadValues.push(c.leadMins);
+    // As duas medidas, separadas — antes viravam um número misto só, e não dava
+    // para saber o que era hora de trabalho e o que era madrugada/fim de semana.
+    // Comercial = minutos úteis. Corrido = relógio de parede.
+    // Trilha aberta fica de fora: ainda é do grupo, não é atendimento de ninguém.
+    if(!c.aberto){
+      agg.leadComercial.push(c.leadMins);
+      agg.leadCorrido.push(Math.round((c.respondido_em - c.pendente_desde) / 60000));
+      if(!agg.lastInteraction || c.respondido_em > agg.lastInteraction) agg.lastInteraction = c.respondido_em;
     }
-    if(!c.aberto && (!agg.lastInteraction || c.respondido_em > agg.lastInteraction)) agg.lastInteraction = c.respondido_em;
   });
 
-  const grpList = Object.values(grpAgg).sort((a,b) => {
-    const avgA = a.leadValues.reduce((s,v)=>s+v,0)/a.leadValues.length;
-    const avgB = b.leadValues.reduce((s,v)=>s+v,0)/b.leadValues.length;
-    return avgB - avgA;
-  });
+  const mediaDe = (a) => a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : 0;
+  const grpList = Object.values(grpAgg).sort((a,b) => mediaDe(b.leadComercial) - mediaDe(a.leadComercial));
 
-  const totalN = casos.length;
-  const allVals = grpList.flatMap(g => g.leadValues);
-  const totalAvg = allVals.length ? Math.round(allVals.reduce((a,b)=>a+b,0)/allVals.length) : 0;
+  const totalN = casos.filter(c => !c.aberto).length;
+  const totalAvg      = mediaDe(grpList.flatMap(g => g.leadComercial));
+  const totalAvgCorr  = mediaDe(grpList.flatMap(g => g.leadCorrido));
 
   // Store grpList for index-based click access
   window._drillLTGrpList = grpList;
 
   const rows = grpList.map((g,i) => {
-    const avg = Math.round(g.leadValues.reduce((a,b)=>a+b,0)/g.leadValues.length);
+    const avg     = mediaDe(g.leadComercial);
+    const avgCorr = mediaDe(g.leadCorrido);
     const openCount = g.casos.filter(c => c.aberto).length;
     const statusBadge = /ativo/i.test(g.status)
       ? '<span class="badge badge-green" style="font-size:.6rem;">Ativo</span>'
@@ -3163,8 +3202,9 @@ function openDrillLT(gestorName, casos){
       <td style="font-size:.67rem;color:var(--text-2);">${i+1}</td>
       <td><div style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(g.grpName)}">${esc(g.grpName)}</div></td>
       <td>${planBadge}</td>
-      <td style="text-align:center;">${g.casos.length}${openBadge}</td>
-      <td><strong style="color:${avg>60?'#b91c1c':'#15803d'}">${fmtMins(avg)}</strong></td>
+      <td style="text-align:center;">${g.leadComercial.length}${openBadge}</td>
+      <td><strong style="color:${avg>60?'#b91c1c':'#15803d'}">${g.leadComercial.length?fmtMins(avg):'—'}</strong></td>
+      <td><strong style="color:rgba(22,163,74,0.85)">${g.leadCorrido.length?fmtMins(avgCorr):'—'}</strong></td>
       <td style="white-space:nowrap;">${lastDt}</td>
       <td>${statusBadge}</td>
     </tr>`;
@@ -3173,21 +3213,24 @@ function openDrillLT(gestorName, casos){
   const body = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
       <span class="drill-count-pill">N = ${totalN}</span>
-      <span class="drill-count-pill" style="background:#f0fdf4;color:#15803d;border-color:rgba(22,163,74,.2);">Média ${fmtMins(totalAvg)}</span>
+      <span class="drill-count-pill" style="background:#eff6ff;color:rgba(8,102,255,0.9);border-color:rgba(8,102,255,.2);">Comercial ${fmtMins(totalAvg)}</span>
+      <span class="drill-count-pill" style="background:#f0fdf4;color:#15803d;border-color:rgba(22,163,74,.2);">Corrido ${fmtMins(totalAvgCorr)}</span>
       <span style="font-size:.72rem;color:var(--text-2);">👆 Clique em um grupo para ver os logs</span>
     </div>
     <div style="overflow-x:auto;">
     <table class="drill-table">
       <thead><tr>
         <th>#</th><th>Grupo</th><th>Plano</th>
-        <th>Atendimentos</th><th>Média Lead Time</th>
+        <th>Atendimentos</th>
+        <th style="color:rgba(8,102,255,0.85);">LT Comercial</th>
+        <th style="color:rgba(22,163,74,0.85);">LT Corrido</th>
         <th>Última interação</th><th>Status</th>
       </tr></thead>
-      <tbody>${rows || '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-2);">Nenhum caso</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text-2);">Nenhum caso</td></tr>'}</tbody>
     </table></div>`;
 
   openDrill(`Detalhes — Lead Time · ${gestorName}`,
-    `Gestor: ${gestorName} · ${grpList.length} grupos · N = ${totalN} · Média = ${fmtMins(totalAvg)}`,
+    `Gestor: ${gestorName} · ${grpList.length} grupos · N = ${totalN} · Comercial ${fmtMins(totalAvg)} · Corrido ${fmtMins(totalAvgCorr)}`,
     body);
 
   // Store for second-level drill
@@ -3255,7 +3298,9 @@ function openDrillLTGroup(gestorName, grpId){
     </tr>`;
   }).join('');
 
-  const avgMixed = agg.leadValues.length ? Math.round(agg.leadValues.reduce((a,b)=>a+b,0)/agg.leadValues.length) : 0;
+  const mediaLista = (a) => a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : 0;
+  const avgComercial = mediaLista(agg.leadComercial);
+  const avgCorrido   = mediaLista(agg.leadCorrido);
 
   const body = `
     <div class="drill-breadcrumb">
@@ -3265,7 +3310,8 @@ function openDrillLTGroup(gestorName, grpId){
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
       <span class="drill-count-pill">N = ${n}</span>
-      <span class="drill-count-pill" style="background:#f0fdf4;color:#15803d;border-color:rgba(22,163,74,.2);">Média ${fmtMins(avgMixed)}</span>
+      <span class="drill-count-pill" style="background:#eff6ff;color:rgba(8,102,255,0.9);border-color:rgba(8,102,255,.2);">Comercial ${fmtMins(avgComercial)}</span>
+      <span class="drill-count-pill" style="background:#f0fdf4;color:#15803d;border-color:rgba(22,163,74,.2);">Corrido ${fmtMins(avgCorrido)}</span>
       <span style="font-size:.72rem;color:var(--text-2);">👆 Clique em um item para ver o log</span>
     </div>
     <div style="overflow-x:auto;">
@@ -3381,7 +3427,59 @@ function logToggleAuto(grpId, grpNameCurrent, pendenteMsTs, respondidoMsTs, chec
 /* ================================================================
    DRILL 3 — RELATÓRIOS NECESSÁRIOS
    ================================================================ */
-function openDrillWeekNeeded(wkLabel, groups){
+function openDrillWeekNeeded(wkLabel, groups, enviados){
+  // Resumo por gestor: quanto cada um já entregou da semana. A lista abaixo diz
+  // quais grupos faltam; esta tabela diz o tamanho do buraco de cada um.
+  const porGestor = {};
+  const conta = (lista, campo) => (lista || []).forEach(g => {
+    const nome = nomeDoGestor(g.gestor) || '—';
+    if(!porGestor[nome]) porGestor[nome] = { enviados:0, faltam:0 };
+    porGestor[nome][campo]++;
+  });
+  conta(enviados, 'enviados');
+  conta(groups,   'faltam');
+
+  const resumo = Object.entries(porGestor)
+    .map(([nome, v]) => ({ nome, ...v, total: v.enviados + v.faltam,
+                           pct: (v.enviados + v.faltam) ? Math.round(v.enviados * 100 / (v.enviados + v.faltam)) : 0 }))
+    .sort((a,b) => a.pct - b.pct || b.faltam - a.faltam);
+
+  const corPct = p => p >= 80 ? '#15803d' : p >= 50 ? '#b45309' : '#b91c1c';
+  const resumoRows = resumo.map(r => `<tr>
+      <td style="font-weight:600;">${esc(r.nome)}</td>
+      <td class="num" style="color:#15803d;font-weight:600;">${r.enviados}</td>
+      <td class="num" style="color:${r.faltam ? '#b91c1c' : 'var(--text-2)'};font-weight:600;">${r.faltam}</td>
+      <td class="num">
+        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">
+          <div style="flex:0 0 72px;height:6px;border-radius:99px;background:#f1f5f9;overflow:hidden;">
+            <div style="width:${r.pct}%;height:100%;background:${corPct(r.pct)};border-radius:99px;"></div>
+          </div>
+          <strong style="color:${corPct(r.pct)};min-width:36px;">${r.pct}%</strong>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  const totalEnv = resumo.reduce((s,r) => s + r.enviados, 0);
+  const totalFal = resumo.reduce((s,r) => s + r.faltam, 0);
+  const totalPct = (totalEnv + totalFal) ? Math.round(totalEnv * 100 / (totalEnv + totalFal)) : 0;
+
+  const resumoTabela = resumo.length ? `
+    <div style="margin-bottom:18px;">
+      <div style="font-size:.72rem;font-weight:600;color:var(--text-2);margin-bottom:8px;">Resumo por gestor</div>
+      <div style="overflow-x:auto;"><table class="drill-table">
+        <thead><tr>
+          <th>Gestor</th><th class="num">Relatórios Enviados</th>
+          <th class="num">Relatórios que Faltam</th><th class="num">Porcentagem</th>
+        </tr></thead>
+        <tbody>${resumoRows}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--border,#e5e7eb);font-weight:700;">
+          <td>Total</td><td class="num" style="color:#15803d;">${totalEnv}</td>
+          <td class="num" style="color:${totalFal ? '#b91c1c' : 'var(--text-2)'};">${totalFal}</td>
+          <td class="num"><strong style="color:${corPct(totalPct)};">${totalPct}%</strong></td>
+        </tr></tfoot>
+      </table></div>
+    </div>` : '';
+
   const rows = groups.map(g => {
     const name = esc(g.name || g.id);
     const gest = esc(g.gestor || '—');
@@ -3404,6 +3502,8 @@ function openDrillWeekNeeded(wkLabel, groups){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
       <span class="drill-count-pill" style="background:#fef2f2;color:#dc2626;border-color:rgba(239,68,68,.2);">Faltam Enviar: ${groups.length}</span>
     </div>
+    ${resumoTabela}
+    <div style="font-size:.72rem;font-weight:600;color:var(--text-2);margin-bottom:8px;">Grupos que faltam</div>
     <div style="overflow-x:auto;"><table class="drill-table">
       <thead><tr><th>Semana</th><th>Grupo</th><th>Gestor</th><th>Motivo</th><th>Status Relatório</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-2);">Nenhum grupo</td></tr>'}</tbody>
