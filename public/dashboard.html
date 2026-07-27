@@ -133,16 +133,16 @@ body {
 #kpi-grid {
   display:grid;
   grid-template-columns:repeat(4,1fr);
-  gap:14px; margin-bottom:14px;
+  gap:12px; margin-bottom:10px;
 }
 #kpi-grid-lt {
   display:grid;
   grid-template-columns:repeat(4,1fr);
-  gap:12px; margin-bottom:28px;
+  gap:10px; margin-bottom:16px;
 }
-#kpi-grid-lt .kpi-card { padding:14px 16px; }
-#kpi-grid-lt .kpi-icon { width:28px; height:28px; border-radius:8px; font-size:14px; margin-bottom:10px; }
-#kpi-grid-lt .kpi-value { font-size:1.3rem; margin-bottom:4px; }
+#kpi-grid-lt .kpi-card { padding:10px 14px; }
+#kpi-grid-lt .kpi-icon { width:26px; height:26px; border-radius:8px; font-size:13px; }
+#kpi-grid-lt .kpi-value { font-size:1.15rem; }
 @media(max-width:1100px){
   #kpi-grid, #kpi-grid-lt { grid-template-columns:repeat(2,1fr); }
 }
@@ -151,22 +151,31 @@ body {
   #kpi-grid-lt { grid-template-columns:repeat(2,1fr); }
 }
 
+/* Ícone ao LADO do número, não empilhado em cima: empilhado, ele sozinho comia
+   ~54px de altura por card e empurrava o gráfico de lead time para fora da
+   primeira dobra. Ao lado, some do fluxo vertical sem perder a leitura. */
 .kpi-card {
   background:var(--surface); border-radius:var(--radius);
-  padding:22px 20px; border:1px solid var(--border);
+  padding:14px 16px; border:1px solid var(--border);
   box-shadow:var(--shadow-sm); transition:var(--transition);
+  display:grid; grid-template-columns:auto 1fr; column-gap:12px;
+  align-items:center;
 }
 .kpi-card:hover { box-shadow:var(--shadow-md); transform:translateY(-2px); }
+/* Ícone ocupa as duas linhas na coluna da esquerda; valor e rótulo empilham na
+   direita. Grid em vez de flex para não precisar de um wrapper no HTML. */
 .kpi-icon {
-  width:38px; height:38px; border-radius:11px;
+  grid-row:1 / 3; grid-column:1; align-self:center;
+  width:30px; height:30px; border-radius:9px;
   display:flex; align-items:center; justify-content:center;
-  margin-bottom:16px; font-size:17px;
+  font-size:15px;
 }
+.kpi-value, .kpi-label { grid-column:2; min-width:0; }
 .kpi-value {
-  font-size:1.9rem; font-weight:800; letter-spacing:-.035em;
-  line-height:1; margin-bottom:6px; color:var(--text);
+  font-size:1.55rem; font-weight:800; letter-spacing:-.035em;
+  line-height:1.1; color:var(--text);
 }
-.kpi-label { font-size:.7rem; font-weight:500; color:var(--text-2); line-height:1.4; }
+.kpi-label { font-size:.7rem; font-weight:500; color:var(--text-2); line-height:1.35; }
 
 /* ── FILTER BAR ── */
 #filter-bar {
@@ -848,7 +857,7 @@ authClient.auth.onAuthStateChange((_event, session) => {
         </div>
         <div class="chart-sub">Azul: horário comercial (min úteis) · Verde: fora do horário (min corridos)</div>
       </div>
-      <div class="chart-wrap" style="height:260px;"><canvas id="chart-lt"></canvas></div>
+      <div class="chart-wrap" style="height:230px;"><canvas id="chart-lt"></canvas></div>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:14px;">
@@ -1990,16 +1999,6 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     msgByIdByGroup[grpId].set(mid, { phone: normalizePhone(gf(row,'phone')), dt: parseDateTime(row) });
   });
 
-  // Mapa LID → telefone: quem já falou uma vez fica identificado, e a marcação
-  // "@249159827382448" passa a ser legível. Vale para a base inteira, não só para o
-  // grupo — a mesma pessoa tem o mesmo LID em todos.
-  LID_TO_PHONE = new Map();
-  sortedRows.forEach(row => {
-    const lid   = gf(row,'senderLid').trim().split('@')[0];
-    const phone = normalizePhone(gf(row,'phone'));
-    if(lid && phone) LID_TO_PHONE.set(lid, phone);
-  });
-
   sortedRows.forEach(row => {
     const grpId = gf(row,'groupId').trim(); if(!grpId) return;
     const meta  = grpMeta[grpId];
@@ -2313,6 +2312,48 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   // Data da virada "a trilha é do grupo, quem responde pega".
   const PENDENTE_SO_DESDE = new Date(2026, 6, 24, 0, 0, 0);   // 24/07/2026
 
+  // O motor não pode enxergar só o período filtrado. Trilha é estado, e estado
+  // depende do que veio antes: se a mensagem do cliente ficou fora da janela, a
+  // trilha nunca abre — a pendência de ontem some ao filtrar hoje, e o atendimento
+  // que começou ontem e foi respondido hoje não conta nem como fechado nem como
+  // aberto, desaparece dos dois lados.
+  //
+  // Então ele roda sobre uma janela maior e o recorte de data é aplicado no
+  // RESULTADO, mais abaixo. Começar em ABANDONO_DIAS antes do início do período
+  // (ou da virada de regra, o que for mais antigo) cobre qualquer trilha viva —
+  // grupo parado além disso já não conta pendência — sem varrer a base inteira.
+  const inicioMotor = new Date(Math.min(+dpStart, +PENDENTE_SO_DESDE));
+  inicioMotor.setDate(inicioMotor.getDate() - ABANDONO_DIAS);
+  const rowsTrilha = allSorted.filter(row => {
+    const d = parseDateTime(row);
+    return d && d >= inicioMotor;
+  });
+
+  // Índices do motor, sobre a janela dele. Os de cima continuam como estão: são do
+  // motor antigo, e alargar a entrada dele mudaria número já apresentado.
+  const msgIndexTrilha = {};   // grpId → Map<texto, [{phone, dt}]>
+  const msgByIdTrilha  = {};   // grpId → Map<message_id, {phone, dt}>
+  LID_TO_PHONE = new Map();
+  rowsTrilha.forEach(row => {
+    const grpId = gf(row,'groupId').trim(); if(!grpId) return;
+    const phone = normalizePhone(gf(row,'phone'));
+    const dt    = parseDateTime(row);
+    const txt   = gf(row,'msg').trim();
+    if(txt){
+      if(!msgIndexTrilha[grpId]) msgIndexTrilha[grpId] = new Map();
+      const m = msgIndexTrilha[grpId];
+      if(!m.has(txt)) m.set(txt, []);
+      m.get(txt).push({ phone, dt });
+    }
+    const mid = gf(row,'messageId').trim();
+    if(mid){
+      if(!msgByIdTrilha[grpId]) msgByIdTrilha[grpId] = new Map();
+      msgByIdTrilha[grpId].set(mid, { phone, dt });
+    }
+    const lid = gf(row,'senderLid').trim().split('@')[0];
+    if(lid && phone) LID_TO_PHONE.set(lid, phone);
+  });
+
   const novoCases = { GESTOR: [], EDICAO: [], WEBDESIGN: [], ESTRATEGIA: [] };
   const trilhasPorGrupo = {};   // grpId → [trilha, ...]
 
@@ -2362,7 +2403,7 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
     });
   };
 
-  sortedRows.forEach(row => {
+  rowsTrilha.forEach(row => {
     const grpId = gf(row,'groupId').trim(); if(!grpId) return;
     const meta  = grpMeta[grpId]; if(!meta) return;
     if(isExcludedGestor(meta.gestor)) return;
@@ -2381,10 +2422,10 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
 
     const overrideAsClient = isLtClientOverrideGroup(grpId) && INVALIDATOR_PHONES.has(senderPhone);
     const fromTeam = !overrideAsClient && isTeamPhone(senderPhone);
-    const citada = citacaoPorId(row, msgByIdByGroup[grpId]);
+    const citada = citacaoPorId(row, msgByIdTrilha[grpId]);
     const replyText = gf(row,'reply').trim();
-    const citadaTexto = !citada && replyText && msgIndexByGroup[grpId]
-      ? (msgIndexByGroup[grpId].get(replyText) || [])[0] : null;
+    const citadaTexto = !citada && replyText && msgIndexTrilha[grpId]
+      ? (msgIndexTrilha[grpId].get(replyText) || [])[0] : null;
     const alvoCitado = citada || citadaTexto;
 
     if(!fromTeam){
@@ -2456,10 +2497,27 @@ function aggregate(rows, planFilter, gestorFilter, statusFilter){
   // respondendo o cliente) ficava pendurada para sempre, contando expediente até
   // agora. Com a virada de modelo isso deixou de existir; um pendente que só o
   // motor velho enxergava não é atendimento aberto, é resíduo da regra antiga.
+  // O recorte de data que antes cortava a ENTRADA do motor agora corta a SAÍDA.
+  //
+  // Fechado entra pela data em que foi respondido: é quando o atendimento
+  // aconteceu. Assim a conversa que começou ontem 23h e foi respondida hoje 9h
+  // conta hoje, em vez de sumir das duas pontas como sumia.
+  //
+  // Aberto é estado, não evento do período: aparece se já estava esperando no fim
+  // da janela. Filtrando hoje, a pendência de ontem aparece — que é o ponto:
+  // esconder quem espera há mais tempo é o oposto do que a lista serve. Olhando um
+  // período passado, pendência que nasceu depois dele não aparece.
+  const inicioDoPeriodo = new Date(dpStart); inicioDoPeriodo.setHours(0,0,0,0);
+  const fimDoPeriodo    = new Date(dpEnd);   fimDoPeriodo.setHours(23,59,59,999);
+  const dentroDoPeriodo = (c) => c.aberto
+    ? c.pendente_desde <= fimDoPeriodo
+    : (c.respondido_em >= inicioDoPeriodo && c.respondido_em <= fimDoPeriodo);
+
   const trocaEra = (arr, novos) => {
     const antigos = arr.filter(c => c.pendente_desde < TRILHA_NOVA_DESDE && !c.aberto);
-    arr.splice(0, arr.length, ...antigos, ...novos);
+    arr.splice(0, arr.length, ...antigos, ...novos.filter(dentroDoPeriodo));
   };
+
   trocaEra(ltCases,           novoCases.GESTOR);
   trocaEra(ltCasesEdicao,     novoCases.EDICAO);
   trocaEra(ltCasesWebdesign,  novoCases.WEBDESIGN);
